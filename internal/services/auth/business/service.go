@@ -2,8 +2,6 @@ package business
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -58,14 +56,20 @@ func (s *service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 
 	user, err := s.repo.FindUserByPhoneAndRole(ctx, phone, role)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			out := &models.CheckPhoneOutput{Registered: false}
+		if repository.IsNotFound(err) {
+			out := &models.CheckPhoneOutput{
+				Registered: false,
+				Message:    "Account not found. Please register.",
+			}
 			if in.IP != "" {
 				captchaRequired, probeErr := s.repo.IncrementNotFoundProbe(ctx, in.IP, notFoundProbeMaxHits, notFoundProbeTTL, captchaRequiredTTL)
 				if probeErr != nil {
 					return nil, internalErr("failed to process auth probe")
 				}
 				out.CaptchaRequired = captchaRequired
+				if captchaRequired {
+					out.Message = "Account not found. Please complete captcha and continue."
+				}
 			}
 			return out, nil
 		}
@@ -171,7 +175,7 @@ func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 
 	user, err := s.repo.FindUserByPhone(ctx, phone)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repository.IsNotFound(err) {
 			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: "USER_NOT_FOUND", Message: "user not found", Details: []string{}}
 		}
 		return nil, internalErr("failed to find user")
@@ -201,7 +205,7 @@ func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		}
 		return otpResponse(phone, time.Now().UTC().Add(otpTTL)), nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !repository.IsNotFound(err) {
 		return nil, internalErr("failed to check otp state")
 	}
 
@@ -244,7 +248,7 @@ func (s *service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 
 	otpRec, err := s.repo.FindLatestUnverifiedOTPByPhoneDevice(ctx, phone, in.DeviceID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if repository.IsNotFound(err) {
 			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: "OTP_INVALID", Message: "invalid otp", Details: []string{}}
 		}
 		return nil, internalErr("failed to fetch otp request")

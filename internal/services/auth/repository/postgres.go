@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"food-delivery-backend/internal/services/auth/models"
@@ -91,7 +92,7 @@ func (s *postgresStore) findUserByPhoneAndRole(ctx context.Context, phone, role 
 		LIMIT 1
 	`, phone, role)
 	if err != nil {
-		return nil, err
+		return nil, mapNotFound(err)
 	}
 	return &row, nil
 }
@@ -106,7 +107,7 @@ func (s *postgresStore) findUserByPhone(ctx context.Context, phone string) (*mod
 		LIMIT 1
 	`, phone)
 	if err != nil {
-		return nil, err
+		return nil, mapNotFound(err)
 	}
 	return &row, nil
 }
@@ -118,7 +119,7 @@ func (s *postgresStore) findUserByID(ctx context.Context, userID string) (*model
 		FROM users WHERE user_id = $1::uuid
 	`, userID)
 	if err != nil {
-		return nil, err
+		return nil, mapNotFound(err)
 	}
 	return &row, nil
 }
@@ -160,7 +161,7 @@ func (s *postgresStore) findLatestActiveOTPByPhone(ctx context.Context, phone st
 		LIMIT 1
 	`, phone)
 	if err != nil {
-		return nil, err
+		return nil, mapNotFound(err)
 	}
 	return &row, nil
 }
@@ -175,7 +176,7 @@ func (s *postgresStore) findLatestUnverifiedOTPByPhoneDevice(ctx context.Context
 		LIMIT 1
 	`, phone, deviceID)
 	if err != nil {
-		return nil, err
+		return nil, mapNotFound(err)
 	}
 	return &row, nil
 }
@@ -184,7 +185,7 @@ func (s *postgresStore) createOTPRequest(ctx context.Context, in CreateOTPReques
 	_, err := s.r.execer().ExecContext(ctx, `
 		INSERT INTO otp_requests
 		(user_id, phone, device_id, ip_address, otp_hash, expires_at, is_verified, attempts, resend_count, last_sent_at, created_at)
-		VALUES ($1::uuid, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, FALSE, 0, 0, NOW(), NOW())
+		VALUES ($1::uuid, $2, NULLIF($3, ''), NULLIF($4, '')::inet, $5, $6, FALSE, 0, 0, NOW(), NOW())
 	`, in.UserID, in.Phone, in.DeviceID, in.IPAddress, in.OTPHash, in.ExpiresAt)
 	return err
 }
@@ -236,7 +237,7 @@ func (s *postgresStore) createSession(ctx context.Context, in CreateSessionInput
 	_, err := s.r.execer().ExecContext(ctx, `
 		INSERT INTO sessions
 		(session_id, user_id, phone, role, device_id, is_active, ip_address, platform, expires_at, logged_in_at, last_active_at, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, TRUE, NULLIF($6, ''), NULLIF($7, '')::platform_type, $8, NOW(), NOW(), NOW(), NOW())
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, TRUE, NULLIF($6, '')::inet, NULLIF($7, '')::platform_type, $8, NOW(), NOW(), NOW(), NOW())
 	`, in.SessionID, in.UserID, in.Phone, in.Role, in.DeviceID, in.IPAddress, in.Platform, in.ExpiresAt)
 	return err
 }
@@ -248,6 +249,9 @@ func (s *postgresStore) deactivateSession(ctx context.Context, sessionID string)
 	return err
 }
 
-func isNoRows(err error) bool {
-	return err == sql.ErrNoRows
+func mapNotFound(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
