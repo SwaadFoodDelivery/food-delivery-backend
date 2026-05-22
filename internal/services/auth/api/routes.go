@@ -17,19 +17,19 @@ func RegisterRoutes(v1Public *gin.RouterGroup, v1Protected *gin.RouterGroup, dep
 
 	publicAuth := v1Public.Group("/auth")
 	checkPhone := publicAuth.Group("/check-phone",
-		middleware.LeakyBucketRateLimit(deps.Redis, "auth_check_phone", 10.0/60.0, 3, 60, middleware.IPKeyFunc),
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_check_phone", 30.0/60.0, 10, 60, middleware.IPKeyFunc),
 		middleware.RequestValidator([]string{"phone", "role"}, validations.ValidateCheckPhoneBody),
 	)
 	checkPhone.POST("", h.CheckPhone)
 
 	register := publicAuth.Group("/register",
-		middleware.LeakyBucketRateLimit(deps.Redis, "auth_register", 5.0/3600.0, 2, 3600, middleware.PhoneKeyFunc),
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_register", 18.0/3600.0, 6, 3600, middleware.PhoneRoleKeyFunc),
 		middleware.RequestValidator([]string{"phone", "name", "email", "referral_code", "role"}, validations.ValidateRegisterBody),
 	)
 	register.POST("", h.Register)
 
 	sendOTP := publicAuth.Group("/send-otp",
-		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_otp", 5.0/3600.0, 2, 3600, middleware.PhoneKeyFunc),
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_otp", 10.0/3600.0, 4, 3600, middleware.PhoneKeyFunc),
 		middleware.RequestValidator([]string{"phone"}, validations.ValidateSendOTPBody),
 	)
 	sendOTP.POST("", h.SendOTP)

@@ -99,6 +99,7 @@ func (s *service) Register(ctx context.Context, in models.RegisterInput) (*model
 	if strings.TrimSpace(in.Name) == "" || len(strings.TrimSpace(in.Name)) > 100 {
 		return nil, badRequest("VALIDATION_ERROR", "name must be non-empty and at most 100 chars")
 	}
+	email := strings.TrimSpace(in.Email)
 
 	rateCount, err := s.repo.GetOTPRateCount(ctx, phone)
 	if err != nil {
@@ -115,6 +116,15 @@ func (s *service) Register(ctx context.Context, in models.RegisterInput) (*model
 	if exists {
 		return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: "PHONE_ALREADY_REGISTERED", Message: "phone already registered", Details: []string{}}
 	}
+	if email != "" {
+		exists, err := s.repo.UserExistsByEmailRole(ctx, email, in.Role)
+		if err != nil {
+			return nil, internalErr("failed to check existing email")
+		}
+		if exists {
+			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: "EMAIL_ALREADY_REGISTERED", Message: "email already registered for this role", Details: []string{}}
+		}
+	}
 
 	otp, hash, expiresAt, svcErr := createOTPBundle()
 	if svcErr != nil {
@@ -125,7 +135,7 @@ func (s *service) Register(ctx context.Context, in models.RegisterInput) (*model
 		userID, err := tx.CreateUser(ctx, repository.CreateUserInput{
 			Phone:        phone,
 			Name:         strings.TrimSpace(in.Name),
-			Email:        strings.TrimSpace(in.Email),
+			Email:        email,
 			Role:         in.Role,
 			ReferralCode: strings.TrimSpace(in.ReferralCode),
 		})

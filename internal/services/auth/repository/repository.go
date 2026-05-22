@@ -16,6 +16,7 @@ type Repository interface {
 	FindUserByPhone(ctx context.Context, phone string) (*models.UserRow, error)
 	FindUserByID(ctx context.Context, userID string) (*models.UserRow, error)
 	UserExistsByPhoneRole(ctx context.Context, phone, role string) (bool, error)
+	UserExistsByEmailRole(ctx context.Context, email, role string) (bool, error)
 	CreateUser(ctx context.Context, in CreateUserInput) (string, error)
 	InsertAuditLog(ctx context.Context, in AuditLogInput) error
 

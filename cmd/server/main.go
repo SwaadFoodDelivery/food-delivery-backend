@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,7 +33,9 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("db")
 	}
-	_ = postgres.RunMigrations(db.DB, "./migrations")
+	if err := postgres.RunMigrations(db.DB, "./migrations"); err != nil {
+		log.Fatal().Err(err).Msg("migrations")
+	}
 	rdb, err := redis.NewRedisClient(cfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("redis")
@@ -49,11 +52,20 @@ func main() {
 	deps := &app.Container{Config: cfg, Logger: log, DB: db, Redis: rdb, KafkaWriter: kw, OrderClient: oc}
 	eng := router.NewRouter(deps)
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: eng}
-	go func() { _ = srv.ListenAndServe() }()
+	srvErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			srvErr <- err
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	select {
+	case err := <-srvErr:
+		log.Fatal().Err(err).Str("addr", srv.Addr).Msg("http server start failed")
+	case <-quit:
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)

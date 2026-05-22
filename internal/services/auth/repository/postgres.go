@@ -31,6 +31,10 @@ func (r *repo) UserExistsByPhoneRole(ctx context.Context, phone, role string) (b
 	return r.postgres.userExistsByPhoneRole(ctx, phone, role)
 }
 
+func (r *repo) UserExistsByEmailRole(ctx context.Context, email, role string) (bool, error) {
+	return r.postgres.userExistsByEmailRole(ctx, email, role)
+}
+
 func (r *repo) CreateUser(ctx context.Context, in CreateUserInput) (string, error) {
 	return r.postgres.createUser(ctx, in)
 }
@@ -129,6 +133,22 @@ func (s *postgresStore) userExistsByPhoneRole(ctx context.Context, phone, role s
 	err := sqlx.GetContext(ctx, s.r.queryer(), &exists, `
 		SELECT EXISTS(SELECT 1 FROM users WHERE phone = $1 AND role = $2 AND is_deleted = FALSE)
 	`, phone, role)
+	return exists, err
+}
+
+func (s *postgresStore) userExistsByEmailRole(ctx context.Context, email, role string) (bool, error) {
+	var exists bool
+	err := sqlx.GetContext(ctx, s.r.queryer(), &exists, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM users
+			WHERE is_deleted = FALSE
+			  AND role = $2
+			  AND email IS NOT NULL
+			  AND btrim(email) <> ''
+			  AND lower(btrim(email)) = lower(btrim($1))
+		)
+	`, email, role)
 	return exists, err
 }
 

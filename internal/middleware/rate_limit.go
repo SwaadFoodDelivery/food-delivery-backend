@@ -107,6 +107,26 @@ func IPKeyFunc(c *gin.Context) string {
 	return strings.TrimSpace(c.ClientIP())
 }
 
+func PhoneRoleKeyFunc(c *gin.Context) string {
+	body, ok := parseJSONBody(c)
+	if !ok {
+		return IPKeyFunc(c)
+	}
+
+	phoneVal, _ := body["phone"].(string)
+	phone := utils.NormalizeIndianPhone(phoneVal)
+	if !utils.ValidateIndianPhone(phone) {
+		return IPKeyFunc(c)
+	}
+
+	roleVal, _ := body["role"].(string)
+	role := normalizeRoleForRateLimit(roleVal)
+	if role == "" {
+		return phone
+	}
+	return phone + ":" + role
+}
+
 func UserIDKeyFunc(c *gin.Context) string {
 	raw, _ := c.Get(ContextUserIDKey)
 	userID, _ := raw.(string)
@@ -114,16 +134,8 @@ func UserIDKeyFunc(c *gin.Context) string {
 }
 
 func PhoneKeyFunc(c *gin.Context) string {
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		return IPKeyFunc(c)
-	}
-	c.Request.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
-	if len(bodyBytes) == 0 {
-		return IPKeyFunc(c)
-	}
-	body := map[string]any{}
-	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+	body, ok := parseJSONBody(c)
+	if !ok {
 		return IPKeyFunc(c)
 	}
 	phoneVal, ok := body["phone"].(string)
@@ -135,6 +147,32 @@ func PhoneKeyFunc(c *gin.Context) string {
 		return IPKeyFunc(c)
 	}
 	return phone
+}
+
+func parseJSONBody(c *gin.Context) (map[string]any, bool) {
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, false
+	}
+	c.Request.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
+	if len(bodyBytes) == 0 {
+		return nil, false
+	}
+	body := map[string]any{}
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		return nil, false
+	}
+	return body, true
+}
+
+func normalizeRoleForRateLimit(role string) string {
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "client", "restaurant_owner", "restaurant_manager", "driver":
+		return role
+	default:
+		return ""
+	}
 }
 
 func parseInt64Value(v any) int64 {
