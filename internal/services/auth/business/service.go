@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"food-delivery-backend/internal/services/auth/models"
+	"food-delivery-backend/internal/services/auth/otp"
 	"food-delivery-backend/internal/services/auth/repository"
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/utils"
@@ -38,13 +39,14 @@ type Service interface {
 }
 
 type service struct {
-	repo repository.Repository
-	cfg  *config.Config
-	log  zerolog.Logger
+	repo        repository.Repository
+	cfg         *config.Config
+	log         zerolog.Logger
+	otpProvider otp.Provider
 }
 
-func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logger) Service {
-	return &service{repo: repo, cfg: cfg, log: log}
+func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logger, otpProvider otp.Provider) Service {
+	return &service{repo: repo, cfg: cfg, log: log, otpProvider: otpProvider}
 }
 
 func (s *service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*models.CheckPhoneOutput, *models.ServiceError) {
@@ -170,8 +172,8 @@ func (s *service) Register(ctx context.Context, in models.RegisterInput) (*model
 		return nil, internalErr("failed to register user")
 	}
 
-	if s.cfg.App.Env == "development" && strings.EqualFold(s.cfg.App.LogLevel, "debug") {
-		s.log.Debug().Str("phone", utils.MaskPhone(phone)).Str("otp", otp).Msg("auth.otp_dispatched")
+	if err := s.otpProvider.Send(ctx, phone, otp); err != nil {
+		return nil, internalErr("failed to dispatch otp")
 	}
 
 	return otpResponse(phone, expiresAt), nil
@@ -210,12 +212,7 @@ func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		if err := s.repo.IncrementOTPResendCount(ctx, otpRec.OTPID); err != nil {
 			return nil, internalErr("failed to update otp resend count")
 		}
-		if err := s.repo.ExpireOTP(ctx, phone, otpTTL); err != nil {
-			return nil, internalErr("failed to refresh otp expiry")
-		}
-		return otpResponse(phone, time.Now().UTC().Add(otpTTL)), nil
-	}
-	if !repository.IsNotFound(err) {
+	} else if !repository.IsNotFound(err) {
 		return nil, internalErr("failed to check otp state")
 	}
 
@@ -237,8 +234,8 @@ func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		return nil, internalErr("failed to store otp cache")
 	}
 
-	if s.cfg.App.Env == "development" && strings.EqualFold(s.cfg.App.LogLevel, "debug") {
-		s.log.Debug().Str("phone", utils.MaskPhone(phone)).Str("otp", otp).Msg("auth.otp_dispatched")
+	if err := s.otpProvider.Send(ctx, phone, otp); err != nil {
+		return nil, internalErr("failed to dispatch otp")
 	}
 
 	return otpResponse(phone, expiresAt), nil

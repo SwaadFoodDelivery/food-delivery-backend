@@ -2,6 +2,7 @@ package app
 
 import (
 	"food-delivery-backend/internal/grpc/client"
+	"food-delivery-backend/internal/services/auth/otp"
 	"food-delivery-backend/pkg/config"
 
 	"github.com/jmoiron/sqlx"
@@ -17,4 +18,5 @@ type Container struct {
 	Redis       *redis.Client
 	KafkaWriter *kafka.Writer
 	OrderClient *client.OrderServiceClient
+	OTPProvider otp.Provider
 }

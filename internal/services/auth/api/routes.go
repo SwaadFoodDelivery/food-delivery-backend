@@ -12,7 +12,7 @@ import (
 
 func RegisterRoutes(v1Public *gin.RouterGroup, v1Protected *gin.RouterGroup, deps *app.Container) {
 	repo := repository.NewRepository(deps.DB, deps.Redis)
-	svc := business.NewService(repo, deps.Config, deps.Logger)
+	svc := business.NewService(repo, deps.Config, deps.Logger, deps.OTPProvider)
 	h := NewHandler(svc)
 
 	publicAuth := v1Public.Group("/auth")

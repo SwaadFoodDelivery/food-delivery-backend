@@ -15,6 +15,7 @@ import (
 	"food-delivery-backend/internal/app"
 	grpcclient "food-delivery-backend/internal/grpc/client"
 	"food-delivery-backend/internal/router"
+	"food-delivery-backend/internal/services/auth/otp"
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/logger"
 )
@@ -49,7 +50,17 @@ func main() {
 		log.Fatal().Err(err).Msg("grpc")
 	}
 
-	deps := &app.Container{Config: cfg, Logger: log, DB: db, Redis: rdb, KafkaWriter: kw, OrderClient: oc}
+	var otpProvider otp.Provider
+	switch cfg.OTP.Provider {
+	case "mock":
+		otpProvider = otp.NewMockProvider(log)
+	case "dev":
+		otpProvider = otp.NewTwilioProvider(cfg.OTP.AccountSID, cfg.OTP.AuthToken, cfg.OTP.FromPhone)
+	default:
+		log.Fatal().Str("otp_provider", cfg.OTP.Provider).Msg("unsupported OTP_PROVIDER, use mock or dev")
+	}
+
+	deps := &app.Container{Config: cfg, Logger: log, DB: db, Redis: rdb, KafkaWriter: kw, OrderClient: oc, OTPProvider: otpProvider}
 	eng := router.NewRouter(deps)
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: eng}
 	srvErr := make(chan error, 1)

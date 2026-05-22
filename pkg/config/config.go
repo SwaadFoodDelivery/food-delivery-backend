@@ -32,6 +32,12 @@ type Config struct {
 	JWT struct {
 		Secret string
 	}
+	OTP struct {
+		Provider  string
+		AccountSID string
+		AuthToken string
+		FromPhone string
+	}
 	GRPC struct {
 		OrderAddr string
 	}
@@ -77,6 +83,10 @@ func Load() (*Config, error) {
 	cfg.Kafka.BatchSize = viper.GetInt("KAFKA_BATCH_SIZE")
 	cfg.Kafka.OrderEventsTopic = viper.GetString("KAFKA_ORDER_EVENTS_TOPIC")
 	cfg.JWT.Secret = viper.GetString("JWT_SECRET")
+	cfg.OTP.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("OTP_PROVIDER")))
+	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")
+	cfg.OTP.AuthToken = viper.GetString("TWILIO_AUTH_TOKEN")
+	cfg.OTP.FromPhone = viper.GetString("TWILIO_FROM_PHONE")
 	cfg.GRPC.OrderAddr = viper.GetString("ORDER_GRPC_ADDR")
 	cfg.RateLimit.DefaultPerMin = viper.GetInt("RATE_LIMIT_DEFAULT_PER_MIN")
 	cfg.RateLimit.WindowSec = viper.GetInt("RATE_LIMIT_WINDOW_SEC")
@@ -85,6 +95,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.GRPC.OrderAddr == "" {
 		cfg.GRPC.OrderAddr = "localhost:50051"
+	}
+	if cfg.OTP.Provider == "" {
+		cfg.OTP.Provider = "mock"
 	}
 	if cfg.RateLimit.DefaultPerMin == 0 {
 		cfg.RateLimit.DefaultPerMin = 60
