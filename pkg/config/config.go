@@ -33,10 +33,10 @@ type Config struct {
 		Secret string
 	}
 	OTP struct {
-		Provider  string
+		Provider   string
 		AccountSID string
-		AuthToken string
-		FromPhone string
+		AuthToken  string
+		FromPhone  string
 	}
 	GRPC struct {
 		OrderAddr string
