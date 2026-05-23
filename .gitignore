@@ -7,3 +7,7 @@ bin/
 coverage.out
 *.pb.go
 .cache/
+.vscode/
+_debug_*
+__debug_*
+cmd/server/__debug_*

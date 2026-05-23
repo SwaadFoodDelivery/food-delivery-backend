@@ -39,10 +39,54 @@ services:
       KAFKA_CFG_LISTENERS: PLAINTEXT://:9092
       KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
 
+  migration-guard:
+    image: postgres:15-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        MAX_FILE_VERSION=$$(ls /migrations/*.up.sql | sed -E 's#.*/([0-9]+)_.*#\1#' | sort -n | tail -1)
+        HAS_SCHEMA_MIGRATIONS=$$(psql -h postgres -U postgres -d food_delivery -tA -c "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations');")
+        if [ "$$HAS_SCHEMA_MIGRATIONS" = "t" ]; then
+          VERSION=$$(psql -h postgres -U postgres -d food_delivery -tA -c "SELECT version FROM schema_migrations LIMIT 1;")
+          DIRTY=$$(psql -h postgres -U postgres -d food_delivery -tA -c "SELECT dirty FROM schema_migrations LIMIT 1;")
+          [ -n "$$VERSION" ] || VERSION=0
+          [ -n "$$DIRTY" ] || DIRTY=f
+
+          if [ "$$DIRTY" = "t" ]; then
+            echo "migration-guard: schema_migrations is dirty=true; refusing startup"
+            exit 1
+          fi
+
+          if [ "$$VERSION" -gt "$$MAX_FILE_VERSION" ]; then
+            echo "migration-guard: DB version=$$VERSION but max migration file=$$MAX_FILE_VERSION"
+            exit 1
+          fi
+
+          i=1
+          while [ "$$i" -le "$$VERSION" ]; do
+            if ! ls /migrations/$$(printf "%06d" "$$i")_*.up.sql >/dev/null 2>&1; then
+              echo "migration-guard: missing migration file for version $$i"
+              exit 1
+            fi
+            i=$$((i+1))
+          done
+        fi
+        echo "migration-guard: migration state looks consistent"
+
   food-delivery-backend:
     build:
       context: .
     depends_on:
+      migration-guard:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

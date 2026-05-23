@@ -1,0 +1,6 @@
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_active_ci
+ON users (lower(btrim(email)))
+WHERE email IS NOT NULL
+  AND btrim(email) <> ''
+  AND is_deleted = FALSE;
+

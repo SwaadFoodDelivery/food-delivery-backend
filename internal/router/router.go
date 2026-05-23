@@ -3,6 +3,7 @@ package router
 import (
 	"food-delivery-backend/internal/app"
 	"food-delivery-backend/internal/middleware"
+	authapi "food-delivery-backend/internal/services/auth/api"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,5 +19,7 @@ func NewRouter(deps *app.Container) *gin.Engine {
 
 	public.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 	protected.GET("/me", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+
+	authapi.RegisterRoutes(public, protected, deps)
 	return r
 }
