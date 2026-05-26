@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"food-delivery-backend/internal/middleware"
-	"food-delivery-backend/internal/services/auth/models"
+	"food-delivery-backend/internal/services/users/models"
 	"food-delivery-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -95,11 +95,11 @@ func ValidateVerifyOTPBody(input map[string]any, c *gin.Context) (any, []middlew
 		req.Phone = utils.NormalizeIndianPhone(phone)
 	}
 
-	otp := strings.TrimSpace(getString(input, "otp"))
-	if !utils.ValidateOTP(otp) {
+	otpCode := strings.TrimSpace(getString(input, "otp"))
+	if !utils.ValidateOTP(otpCode) {
 		details = append(details, middleware.ValidationDetail{Field: "otp", Message: "must be exactly 6 digits"})
 	} else {
-		req.OTP = otp
+		req.OTP = otpCode
 	}
 
 	deviceID := strings.TrimSpace(c.GetHeader("X-Device-ID"))

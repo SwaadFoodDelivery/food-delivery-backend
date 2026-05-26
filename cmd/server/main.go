@@ -15,7 +15,8 @@ import (
 	"food-delivery-backend/internal/app"
 	grpcclient "food-delivery-backend/internal/grpc/client"
 	"food-delivery-backend/internal/router"
-	"food-delivery-backend/internal/services/auth/otp"
+	"food-delivery-backend/internal/services/common/otp"
+	"food-delivery-backend/internal/services/common/storage"
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/logger"
 )
@@ -60,7 +61,26 @@ func main() {
 		log.Fatal().Str("otp_provider", cfg.OTP.Provider).Msg("unsupported OTP_PROVIDER, use mock or dev")
 	}
 
-	deps := &app.Container{Config: cfg, Logger: log, DB: db, Redis: rdb, KafkaWriter: kw, OrderClient: oc, OTPProvider: otpProvider}
+	var storageProvider storage.Provider
+	switch cfg.S3.Provider {
+	case "mock":
+		storageProvider = storage.NewMockProvider(cfg.S3.MockBaseURL)
+	case "dev":
+		storageProvider = storage.NewDevProvider(cfg.S3.AccessKeyID, cfg.S3.SecretAccessKey, cfg.S3.Region, cfg.S3.Endpoint)
+	default:
+		log.Fatal().Str("s3_provider", cfg.S3.Provider).Msg("unsupported S3_PROVIDER, use mock or dev")
+	}
+
+	deps := &app.Container{
+		Config:          cfg,
+		Logger:          log,
+		DB:              db,
+		Redis:           rdb,
+		KafkaWriter:     kw,
+		OrderClient:     oc,
+		OTPProvider:     otpProvider,
+		StorageProvider: storageProvider,
+	}
 	eng := router.NewRouter(deps)
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: eng}
 	srvErr := make(chan error, 1)

@@ -38,6 +38,16 @@ type Config struct {
 		AuthToken  string
 		FromPhone  string
 	}
+	S3 struct {
+		Provider          string
+		Bucket            string
+		Region            string
+		Endpoint          string
+		AccessKeyID       string
+		SecretAccessKey   string
+		PresignTTLSeconds int
+		MockBaseURL       string
+	}
 	GRPC struct {
 		OrderAddr string
 	}
@@ -87,6 +97,14 @@ func Load() (*Config, error) {
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")
 	cfg.OTP.AuthToken = viper.GetString("TWILIO_AUTH_TOKEN")
 	cfg.OTP.FromPhone = viper.GetString("TWILIO_FROM_PHONE")
+	cfg.S3.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("S3_PROVIDER")))
+	cfg.S3.Bucket = strings.TrimSpace(viper.GetString("S3_BUCKET"))
+	cfg.S3.Region = strings.TrimSpace(viper.GetString("S3_REGION"))
+	cfg.S3.Endpoint = strings.TrimSpace(viper.GetString("S3_ENDPOINT"))
+	cfg.S3.AccessKeyID = strings.TrimSpace(viper.GetString("S3_ACCESS_KEY_ID"))
+	cfg.S3.SecretAccessKey = strings.TrimSpace(viper.GetString("S3_SECRET_ACCESS_KEY"))
+	cfg.S3.PresignTTLSeconds = viper.GetInt("S3_PRESIGN_TTL_SECONDS")
+	cfg.S3.MockBaseURL = strings.TrimSpace(viper.GetString("S3_MOCK_BASE_URL"))
 	cfg.GRPC.OrderAddr = viper.GetString("ORDER_GRPC_ADDR")
 	cfg.RateLimit.DefaultPerMin = viper.GetInt("RATE_LIMIT_DEFAULT_PER_MIN")
 	cfg.RateLimit.WindowSec = viper.GetInt("RATE_LIMIT_WINDOW_SEC")
@@ -98,6 +116,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.OTP.Provider == "" {
 		cfg.OTP.Provider = "mock"
+	}
+	if cfg.S3.Provider == "" {
+		cfg.S3.Provider = "mock"
+	}
+	if cfg.S3.PresignTTLSeconds == 0 {
+		cfg.S3.PresignTTLSeconds = 300
+	}
+	if cfg.S3.Region == "" {
+		cfg.S3.Region = "ap-south-1"
 	}
 	if cfg.RateLimit.DefaultPerMin == 0 {
 		cfg.RateLimit.DefaultPerMin = 60

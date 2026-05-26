@@ -1,4 +1,4 @@
-package api
+package handler
 
 import (
 	"net/http"
@@ -6,21 +6,21 @@ import (
 	"time"
 
 	"food-delivery-backend/internal/middleware"
-	"food-delivery-backend/internal/services/auth/business"
-	"food-delivery-backend/internal/services/auth/models"
+	"food-delivery-backend/internal/services/users/business"
+	"food-delivery-backend/internal/services/users/models"
 
 	"github.com/gin-gonic/gin"
 )
 
-type Handler struct {
-	svc business.Service
+type AuthHandler struct {
+	svc business.AuthService
 }
 
-func NewHandler(svc business.Service) *Handler {
-	return &Handler{svc: svc}
+func NewAuthHandler(svc business.AuthService) *AuthHandler {
+	return &AuthHandler{svc: svc}
 }
 
-func (h *Handler) CheckPhone(c *gin.Context) {
+func (h *AuthHandler) CheckPhone(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.CheckPhoneRequest](c)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
@@ -48,7 +48,7 @@ func (h *Handler) CheckPhone(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
 }
 
-func (h *Handler) Register(c *gin.Context) {
+func (h *AuthHandler) Register(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.RegisterRequest](c)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
@@ -71,7 +71,7 @@ func (h *Handler) Register(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
 }
 
-func (h *Handler) SendOTP(c *gin.Context) {
+func (h *AuthHandler) SendOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.SendOTPRequest](c)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
@@ -90,7 +90,7 @@ func (h *Handler) SendOTP(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
 }
 
-func (h *Handler) VerifyOTP(c *gin.Context) {
+func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.VerifyOTPRequest](c)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
@@ -112,14 +112,14 @@ func (h *Handler) VerifyOTP(c *gin.Context) {
 	}
 
 	if clientType == "web" {
-		c.SetCookie("refresh_token", out.RefreshToken, int((30 * 24 * time.Hour).Seconds()), "/", "", true, true)
+		c.SetCookie("refresh_token", out.RefreshToken, int((30 * time.Hour * 24).Seconds()), "/", "", true, true)
 		out.RefreshToken = ""
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
 }
 
-func (h *Handler) Logout(c *gin.Context) {
+func (h *AuthHandler) Logout(c *gin.Context) {
 	sessionID, _ := c.Get(middleware.ContextSessionIDKey)
 	userID, _ := c.Get(middleware.ContextUserIDKey)
 	role, _ := c.Get(middleware.ContextRoleKey)

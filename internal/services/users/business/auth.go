@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"food-delivery-backend/internal/services/auth/models"
-	"food-delivery-backend/internal/services/auth/otp"
-	"food-delivery-backend/internal/services/auth/repository"
+	"food-delivery-backend/internal/services/common/otp"
+	"food-delivery-backend/internal/services/common/storage"
+	"food-delivery-backend/internal/services/users/models"
+	"food-delivery-backend/internal/services/users/repository/repository"
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/utils"
 
@@ -30,7 +31,7 @@ const (
 	notFoundProbeMaxHits = 3
 )
 
-type Service interface {
+type AuthService interface {
 	CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*models.CheckPhoneOutput, *models.ServiceError)
 	Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError)
 	SendOTP(ctx context.Context, in models.SendOTPInput) (*models.OTPSendOutput, *models.ServiceError)
@@ -38,18 +39,19 @@ type Service interface {
 	Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError
 }
 
-type service struct {
-	repo        repository.Repository
-	cfg         *config.Config
-	log         zerolog.Logger
-	otpProvider otp.Provider
+type Service struct {
+	repo            repository.Repository
+	cfg             *config.Config
+	log             zerolog.Logger
+	otpProvider     otp.Provider
+	storageProvider storage.Provider
 }
 
-func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logger, otpProvider otp.Provider) Service {
-	return &service{repo: repo, cfg: cfg, log: log, otpProvider: otpProvider}
+func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logger, otpProvider otp.Provider, storageProvider storage.Provider) *Service {
+	return &Service{repo: repo, cfg: cfg, log: log, otpProvider: otpProvider, storageProvider: storageProvider}
 }
 
-func (s *service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*models.CheckPhoneOutput, *models.ServiceError) {
+func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*models.CheckPhoneOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
 		return nil, badRequest("INVALID_PHONE", err.Error())
@@ -93,7 +95,7 @@ func (s *service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 	}, nil
 }
 
-func (s *service) Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError) {
+func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
 		return nil, badRequest("INVALID_PHONE", err.Error())
@@ -128,7 +130,7 @@ func (s *service) Register(ctx context.Context, in models.RegisterInput) (*model
 		}
 	}
 
-	otp, hash, expiresAt, svcErr := createOTPBundle()
+	otpCode, hash, expiresAt, svcErr := createOTPBundle()
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -172,14 +174,14 @@ func (s *service) Register(ctx context.Context, in models.RegisterInput) (*model
 		return nil, internalErr("failed to register user")
 	}
 
-	if err := s.otpProvider.Send(ctx, phone, otp); err != nil {
+	if err := s.otpProvider.Send(ctx, phone, otpCode); err != nil {
 		return nil, internalErr("failed to dispatch otp")
 	}
 
 	return otpResponse(phone, expiresAt), nil
 }
 
-func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.OTPSendOutput, *models.ServiceError) {
+func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.OTPSendOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
 		return nil, badRequest("INVALID_PHONE", err.Error())
@@ -216,7 +218,7 @@ func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		return nil, internalErr("failed to check otp state")
 	}
 
-	otp, hash, expiresAt, svcErr := createOTPBundle()
+	otpCode, hash, expiresAt, svcErr := createOTPBundle()
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -234,14 +236,14 @@ func (s *service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		return nil, internalErr("failed to store otp cache")
 	}
 
-	if err := s.otpProvider.Send(ctx, phone, otp); err != nil {
+	if err := s.otpProvider.Send(ctx, phone, otpCode); err != nil {
 		return nil, internalErr("failed to dispatch otp")
 	}
 
 	return otpResponse(phone, expiresAt), nil
 }
 
-func (s *service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*models.VerifyOTPOutput, *models.ServiceError) {
+func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*models.VerifyOTPOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
 		return nil, badRequest("INVALID_PHONE", err.Error())
@@ -385,7 +387,7 @@ func (s *service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 	return out, nil
 }
 
-func (s *service) Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError {
+func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError {
 	if strings.TrimSpace(in.SessionID) == "" || strings.TrimSpace(in.UserID) == "" {
 		return badRequest("VALIDATION_ERROR", "missing session or user id")
 	}
@@ -407,22 +409,22 @@ func (s *service) Logout(ctx context.Context, in models.LogoutInput) *models.Ser
 	}
 
 	if err := s.repo.DeleteSession(ctx, in.SessionID); err != nil {
-		s.log.Warn().Str("session_id", in.SessionID).Err(err).Msg("auth.logout.redis_delete_failed")
+		s.log.Warn().Str("session_id", in.SessionID).Err(err).Msg("users.logout.redis_delete_failed")
 	}
 	return nil
 }
 
 func createOTPBundle() (string, string, time.Time, *models.ServiceError) {
-	otp, err := utils.GenerateOTP()
+	otpCode, err := utils.GenerateOTP()
 	if err != nil {
 		return "", "", time.Time{}, internalErr("failed to generate otp")
 	}
-	hash, err := utils.HashOTP(otp)
+	hash, err := utils.HashOTP(otpCode)
 	if err != nil {
 		return "", "", time.Time{}, internalErr("failed to hash otp")
 	}
 	expiresAt := time.Now().UTC().Add(otpTTL)
-	return otp, hash, expiresAt, nil
+	return otpCode, hash, expiresAt, nil
 }
 
 func otpResponse(phone string, expiresAt time.Time) *models.OTPSendOutput {
