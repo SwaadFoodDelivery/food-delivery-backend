@@ -28,7 +28,7 @@ func NewStore(accessor Accessor) *Store {
 func (s *Store) FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error) {
 	var row models.UserRow
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
-		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, referral_code, account_status, created_at
+		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, onboarding_complete, referral_code, account_status, created_at
 		FROM users
 		WHERE phone = $1 AND role = $2 AND is_deleted = FALSE
 		LIMIT 1
@@ -42,7 +42,7 @@ func (s *Store) FindUserByPhoneAndRole(ctx context.Context, phone, role string) 
 func (s *Store) FindUserByPhone(ctx context.Context, phone string) (*models.UserRow, error) {
 	var row models.UserRow
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
-		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, referral_code, account_status, created_at
+		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, onboarding_complete, referral_code, account_status, created_at
 		FROM users
 		WHERE phone = $1 AND is_deleted = FALSE
 		ORDER BY created_at ASC
@@ -57,8 +57,9 @@ func (s *Store) FindUserByPhone(ctx context.Context, phone string) (*models.User
 func (s *Store) FindUserByID(ctx context.Context, userID string) (*models.UserRow, error) {
 	var row models.UserRow
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
-		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, referral_code, account_status, created_at
-		FROM users WHERE user_id = $1::uuid
+		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, onboarding_complete, referral_code, account_status, created_at
+		FROM users
+		WHERE user_id = $1::uuid AND is_deleted = FALSE
 	`, userID)
 	if err != nil {
 		return nil, mapNotFound(err)

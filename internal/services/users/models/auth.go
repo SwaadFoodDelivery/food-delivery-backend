@@ -89,16 +89,17 @@ type VerifiedUser struct {
 }
 
 type UserRow struct {
-	UserID        string         `db:"user_id"`
-	Phone         string         `db:"phone"`
-	Role          string         `db:"role"`
-	Name          string         `db:"name"`
-	Email         sql.NullString `db:"email"`
-	EmailVerified bool           `db:"email_verified"`
-	PhoneVerified bool           `db:"phone_verified"`
-	ReferralCode  sql.NullString `db:"referral_code"`
-	AccountStatus string         `db:"account_status"`
-	CreatedAt     time.Time      `db:"created_at"`
+	UserID             string         `db:"user_id"`
+	Phone              string         `db:"phone"`
+	Role               string         `db:"role"`
+	Name               string         `db:"name"`
+	Email              sql.NullString `db:"email"`
+	EmailVerified      bool           `db:"email_verified"`
+	PhoneVerified      bool           `db:"phone_verified"`
+	OnboardingComplete bool           `db:"onboarding_complete"`
+	ReferralCode       sql.NullString `db:"referral_code"`
+	AccountStatus      string         `db:"account_status"`
+	CreatedAt          time.Time      `db:"created_at"`
 }
 
 type OTPRow struct {
