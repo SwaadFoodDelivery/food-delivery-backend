@@ -39,6 +39,30 @@ services:
       KAFKA_CFG_LISTENERS: PLAINTEXT://:9092
       KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done &&
+      mc mb --ignore-existing local/food-delivery-local &&
+      mc anonymous set none local/food-delivery-local
+      "
+
   migration-guard:
     image: postgres:15-alpine
     depends_on:
@@ -93,6 +117,10 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     environment:
       APP_NAME: food-delivery-backend
       APP_ENV: development
@@ -111,6 +139,13 @@ services:
       KAFKA_BATCH_SIZE: "1"
       KAFKA_ORDER_EVENTS_TOPIC: order-events
       JWT_SECRET: dev-secret
+      S3_PROVIDER: dev
+      S3_BUCKET: food-delivery-local
+      S3_REGION: ap-south-1
+      S3_ENDPOINT: http://host.docker.internal:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_PRESIGN_TTL_SECONDS: "300"
       ORDER_GRPC_ADDR: host.docker.internal:50051
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -120,3 +155,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  minio_data:

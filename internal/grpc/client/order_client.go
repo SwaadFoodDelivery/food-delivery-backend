@@ -2,6 +2,9 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"strings"
+
 	"food-delivery-backend/pkg/config"
 
 	"google.golang.org/grpc"
@@ -12,8 +15,18 @@ type OrderServiceClient struct {
 	conn *grpc.ClientConn
 }
 
-func NewOrderServiceClient(cfg *config.Config) (*OrderServiceClient, error) {
-	conn, err := grpc.Dial(cfg.GRPC.OrderAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func NewOrderServiceClient(ctx context.Context, cfg *config.Config) (*OrderServiceClient, error) {
+	addr := strings.TrimSpace(cfg.GRPC.OrderAddr)
+	if addr == "" {
+		return nil, fmt.Errorf("ORDER_GRPC_ADDR is required")
+	}
+
+	conn, err := grpc.DialContext(
+		ctx,
+		addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
 	if err != nil {
 		return nil, err
 	}

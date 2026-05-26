@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -9,7 +10,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
-func RunMigrations(db *sql.DB, migrationsPath string) error {
+func RunMigrations(ctx context.Context, db *sql.DB, migrationsPath string) error {
 	driver, err := mp.WithInstance(db, &mp.Config{})
 	if err != nil {
 		return err
@@ -18,8 +19,19 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return err
+	errCh := make(chan error, 1)
+	go func() {
+		if runErr := m.Up(); runErr != nil && runErr != migrate.ErrNoChange {
+			errCh <- runErr
+			return
+		}
+		errCh <- nil
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case runErr := <-errCh:
+		return runErr
 	}
-	return nil
 }

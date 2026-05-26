@@ -409,7 +409,11 @@ func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.Ser
 	}
 
 	if err := s.repo.DeleteSession(ctx, in.SessionID); err != nil {
-		s.log.Warn().Str("session_id", in.SessionID).Err(err).Msg("users.logout.redis_delete_failed")
+		ctxLog := zerolog.Ctx(ctx)
+		if ctxLog == nil || ctxLog.GetLevel() == zerolog.Disabled {
+			ctxLog = &s.log
+		}
+		ctxLog.Warn().Str("session_id", in.SessionID).Err(err).Msg("users.logout.redis_delete_failed")
 	}
 	return nil
 }
