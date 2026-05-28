@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"food-delivery-backend/internal/constants"
+
 	"github.com/spf13/viper"
 )
 
@@ -41,6 +43,8 @@ type Config struct {
 	S3 struct {
 		Provider          string
 		Bucket            string
+		DefaultBucket     string
+		Buckets           map[string]string
 		Region            string
 		Endpoint          string
 		AccessKeyID       string
@@ -99,6 +103,10 @@ func Load() (*Config, error) {
 	cfg.OTP.FromPhone = viper.GetString("TWILIO_FROM_PHONE")
 	cfg.S3.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("S3_PROVIDER")))
 	cfg.S3.Bucket = strings.TrimSpace(viper.GetString("S3_BUCKET"))
+	cfg.S3.Buckets = parseS3Buckets(viper.GetString("S3_BUCKETS"))
+	cfg.S3.DefaultBucket = firstNonEmpty(viper.GetString("S3_DEFAULT_BUCKET"), cfg.S3.Buckets[constants.S3BucketPurposeDefault], cfg.S3.Bucket)
+	cfg.S3.Buckets[constants.S3BucketPurposeDefault] = cfg.S3.DefaultBucket
+	cfg.S3.Buckets[constants.S3BucketPurposeOnboarding] = firstNonEmpty(viper.GetString("S3_ONBOARDING_BUCKET"), cfg.S3.Buckets[constants.S3BucketPurposeOnboarding], cfg.S3.DefaultBucket)
 	cfg.S3.Region = strings.TrimSpace(viper.GetString("S3_REGION"))
 	cfg.S3.Endpoint = strings.TrimSpace(viper.GetString("S3_ENDPOINT"))
 	cfg.S3.AccessKeyID = strings.TrimSpace(viper.GetString("S3_ACCESS_KEY_ID"))
@@ -109,28 +117,67 @@ func Load() (*Config, error) {
 	cfg.RateLimit.DefaultPerMin = viper.GetInt("RATE_LIMIT_DEFAULT_PER_MIN")
 	cfg.RateLimit.WindowSec = viper.GetInt("RATE_LIMIT_WINDOW_SEC")
 	if cfg.App.Port == "" {
-		cfg.App.Port = "8080"
+		cfg.App.Port = constants.DefaultAppPort
 	}
 	if cfg.GRPC.OrderAddr == "" {
-		cfg.GRPC.OrderAddr = "localhost:50051"
+		cfg.GRPC.OrderAddr = constants.DefaultOrderGRPCAddr
 	}
 	if cfg.OTP.Provider == "" {
-		cfg.OTP.Provider = "mock"
+		cfg.OTP.Provider = constants.ProviderMock
 	}
 	if cfg.S3.Provider == "" {
-		cfg.S3.Provider = "mock"
+		cfg.S3.Provider = constants.ProviderMock
 	}
 	if cfg.S3.PresignTTLSeconds == 0 {
-		cfg.S3.PresignTTLSeconds = 300
+		cfg.S3.PresignTTLSeconds = constants.DefaultS3PresignTTLSeconds
 	}
 	if cfg.S3.Region == "" {
-		cfg.S3.Region = "ap-south-1"
+		cfg.S3.Region = constants.DefaultS3Region
 	}
 	if cfg.RateLimit.DefaultPerMin == 0 {
-		cfg.RateLimit.DefaultPerMin = 60
+		cfg.RateLimit.DefaultPerMin = constants.DefaultRateLimitPerMinute
 	}
 	if cfg.RateLimit.WindowSec == 0 {
-		cfg.RateLimit.WindowSec = 60
+		cfg.RateLimit.WindowSec = constants.DefaultRateLimitWindowSec
 	}
 	return cfg, nil
+}
+
+func (c Config) S3BucketFor(purpose string) string {
+	purpose = strings.ToLower(strings.TrimSpace(purpose))
+	if bucket := strings.TrimSpace(c.S3.Buckets[purpose]); bucket != "" {
+		return bucket
+	}
+	if bucket := strings.TrimSpace(c.S3.DefaultBucket); bucket != "" {
+		return bucket
+	}
+	return strings.TrimSpace(c.S3.Bucket)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func parseS3Buckets(raw string) map[string]string {
+	buckets := map[string]string{}
+	for _, item := range strings.Split(raw, ",") {
+		key, value, ok := strings.Cut(item, ":")
+		if !ok {
+			key, value, ok = strings.Cut(item, "=")
+		}
+		if !ok {
+			continue
+		}
+		purpose := strings.ToLower(strings.TrimSpace(key))
+		bucket := strings.TrimSpace(value)
+		if purpose != "" && bucket != "" {
+			buckets[purpose] = bucket
+		}
+	}
+	return buckets
 }

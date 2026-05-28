@@ -3,6 +3,9 @@ package middleware
 import (
 	"net/http"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
+
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 )
@@ -16,7 +19,7 @@ func PanicRecovery(log zerolog.Logger) gin.HandlerFunc {
 					ctxLog = &log
 				}
 				ctxLog.Error().Interface("panic", r).Msg("panic_recovered")
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "INTERNAL_ERROR", "message": "internal error", "details": []string{}})
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeInternal, "message": "internal error", "details": []string{}})
 			}
 		}()
 		c.Next()

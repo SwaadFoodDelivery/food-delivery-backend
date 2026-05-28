@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"food-delivery-backend/internal/services/users/errors"
+	"food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/users/models"
 	postgresstore "food-delivery-backend/internal/services/users/repository/postgres"
 	redisstore "food-delivery-backend/internal/services/users/repository/redis"

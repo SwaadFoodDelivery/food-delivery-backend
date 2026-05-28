@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/users/repository/repository"
 
 	"github.com/gin-gonic/gin"
@@ -13,41 +15,41 @@ import (
 func RequireOnboardingAccess(repo repository.Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if repo == nil {
-			abortError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "repository not configured")
+			abortError(c, http.StatusInternalServerError, apperrors.CodeInternal, "repository not configured")
 			return
 		}
 
-		rawUserID, ok := c.Get(ContextUserIDKey)
+		rawUserID, ok := c.Get(constants.AuthContextUserIDKey)
 		if !ok {
-			abortError(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing auth claims")
+			abortError(c, http.StatusUnauthorized, apperrors.CodeUnauthorized, "missing auth claims")
 			return
 		}
 		userID := strings.TrimSpace(castToString(rawUserID))
 		if userID == "" {
-			abortError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid auth claims")
+			abortError(c, http.StatusUnauthorized, apperrors.CodeUnauthorized, "invalid auth claims")
 			return
 		}
 
 		user, err := repo.FindUserByID(c.Request.Context(), userID)
 		if err != nil {
 			if repository.IsNotFound(err) {
-				abortError(c, http.StatusUnauthorized, "USER_NOT_FOUND", "user not found")
+				abortError(c, http.StatusUnauthorized, apperrors.CodeUserNotFound, "user not found")
 				return
 			}
-			abortError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to validate onboarding access")
+			abortError(c, http.StatusInternalServerError, apperrors.CodeInternal, "failed to validate onboarding access")
 			return
 		}
 
-		if claimRole, ok := c.Get(ContextRoleKey); ok && strings.TrimSpace(castToString(claimRole)) != strings.TrimSpace(user.Role) {
-			abortError(c, http.StatusForbidden, "FORBIDDEN", "role mismatch")
+		if claimRole, ok := c.Get(constants.AuthContextRoleKey); ok && strings.TrimSpace(castToString(claimRole)) != strings.TrimSpace(user.Role) {
+			abortError(c, http.StatusForbidden, apperrors.CodeForbidden, "role mismatch")
 			return
 		}
-		if strings.ToLower(strings.TrimSpace(user.AccountStatus)) != "active" {
-			abortError(c, http.StatusForbidden, "ACCOUNT_NOT_ACTIVE", "account is not active")
+		if strings.ToLower(strings.TrimSpace(user.AccountStatus)) != constants.AccountStatusActive {
+			abortError(c, http.StatusForbidden, apperrors.CodeAccountNotActive, "account is not active")
 			return
 		}
 		if user.OnboardingComplete {
-			abortError(c, http.StatusConflict, "ONBOARDING_ALREADY_COMPLETED", "onboarding already completed")
+			abortError(c, http.StatusConflict, apperrors.CodeOnboardingAlreadyCompleted, "onboarding already completed")
 			return
 		}
 

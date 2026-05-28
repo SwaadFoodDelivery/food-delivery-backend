@@ -4,9 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	appredis "food-delivery-backend/infra/redis"
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/pkg/config"
 	apputils "food-delivery-backend/pkg/utils"
 
@@ -15,24 +16,16 @@ import (
 	rds "github.com/redis/go-redis/v9"
 )
 
-const (
-	ContextUserIDKey    = "user_id"
-	ContextRoleKey      = "role"
-	ContextSessionIDKey = "sid"
-	ContextClaimsKey    = "auth_claims"
-	sessionTTL          = 24 * time.Hour
-)
-
 func JWTAuthMiddleware(cfg *config.Config, rc *rds.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		auth := strings.TrimSpace(c.GetHeader("Authorization"))
-		if !strings.HasPrefix(auth, "Bearer ") {
-			abortError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid bearer")
+		auth := strings.TrimSpace(c.GetHeader(constants.HeaderAuthorization))
+		if !strings.HasPrefix(auth, constants.BearerPrefix) {
+			abortError(c, http.StatusUnauthorized, apperrors.CodeUnauthorized, "invalid bearer")
 			return
 		}
-		rawToken := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		rawToken := strings.TrimSpace(strings.TrimPrefix(auth, constants.BearerPrefix))
 		if rawToken == "" || cfg.JWT.Secret == "" {
-			abortError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid token")
+			abortError(c, http.StatusUnauthorized, apperrors.CodeUnauthorized, "invalid token")
 			return
 		}
 
@@ -40,41 +33,41 @@ func JWTAuthMiddleware(cfg *config.Config, rc *rds.Client) gin.HandlerFunc {
 		if err != nil {
 			switch {
 			case errors.Is(err, jwt.ErrTokenExpired):
-				abortError(c, http.StatusUnauthorized, "TOKEN_EXPIRED", "token expired")
+				abortError(c, http.StatusUnauthorized, apperrors.CodeTokenExpired, "token expired")
 			default:
-				abortError(c, http.StatusUnauthorized, "INVALID_TOKEN", "invalid token")
+				abortError(c, http.StatusUnauthorized, apperrors.CodeInvalidToken, "invalid token")
 			}
 			return
 		}
 		if claims.ID == "" {
-			abortError(c, http.StatusUnauthorized, "INVALID_TOKEN", "invalid token claims")
+			abortError(c, http.StatusUnauthorized, apperrors.CodeInvalidToken, "invalid token claims")
 			return
 		}
 
 		sKey := appredis.SessionKey(claims.ID)
 		sessionData, err := rc.HGetAll(c.Request.Context(), sKey).Result()
 		if err != nil || len(sessionData) == 0 {
-			abortError(c, http.StatusUnauthorized, "SESSION_NOT_FOUND", "session not found")
+			abortError(c, http.StatusUnauthorized, apperrors.CodeSessionNotFound, "session not found")
 			return
 		}
-		if strings.ToLower(strings.TrimSpace(sessionData["is_active"])) != "true" {
-			abortError(c, http.StatusUnauthorized, "SESSION_REVOKED", "session revoked")
+		if strings.ToLower(strings.TrimSpace(sessionData["is_active"])) != constants.RedisSessionActiveValue {
+			abortError(c, http.StatusUnauthorized, apperrors.CodeSessionRevoked, "session revoked")
 			return
 		}
 
-		c.Set(ContextUserIDKey, claims.UserID)
-		c.Set(ContextRoleKey, claims.Role)
-		c.Set(ContextSessionIDKey, claims.ID)
-		c.Set(ContextClaimsKey, claims)
+		c.Set(constants.AuthContextUserIDKey, claims.UserID)
+		c.Set(constants.AuthContextRoleKey, claims.Role)
+		c.Set(constants.AuthContextSessionIDKey, claims.ID)
+		c.Set(constants.AuthContextClaimsKey, claims)
 
-		_ = rc.Expire(c.Request.Context(), sKey, sessionTTL).Err()
+		_ = rc.Expire(c.Request.Context(), sKey, constants.AuthSessionTTL).Err()
 		c.Next()
 	}
 }
 
 func abortError(c *gin.Context, statusCode int, code, message string) {
 	c.AbortWithStatusJSON(statusCode, gin.H{
-		"status":     "error",
+		"status":     constants.ResponseStatusError,
 		"error_code": code,
 		"message":    message,
 		"details":    []string{},

@@ -3,6 +3,7 @@ package validations
 import (
 	"strings"
 
+	"food-delivery-backend/internal/constants"
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/models"
 
@@ -37,4 +38,47 @@ func ValidateDocumentUploadedBody(input map[string]any, _ *gin.Context) (any, []
 		details = append(details, middleware.ValidationDetail{Field: "s3_key", Message: "is required"})
 	}
 	return map[string]string{"s3_key": s3Key}, details
+}
+
+func ValidateInitOnboardingInput(in models.InitOnboardingInput) (models.InitOnboardingInput, []string) {
+	out := models.InitOnboardingInput{
+		UserID:  strings.TrimSpace(in.UserID),
+		Role:    strings.TrimSpace(in.Role),
+		Country: strings.ToUpper(strings.TrimSpace(in.Country)),
+	}
+	details := make([]string, 0)
+	if out.UserID == "" {
+		details = append(details, "user_id is required")
+	}
+	if !validRole(out.Role) {
+		details = append(details, "invalid role")
+	}
+	if out.Country == "" {
+		out.Country = constants.DefaultCountryISO2
+	}
+	if len(out.Country) != 2 {
+		details = append(details, "country must be ISO-2 code")
+	}
+	return out, details
+}
+
+func ValidateOnboardingIDs(userID, onboardingID string) (string, string, []string) {
+	u := strings.TrimSpace(userID)
+	o := strings.TrimSpace(onboardingID)
+	details := make([]string, 0)
+	if u == "" {
+		details = append(details, "user_id is required")
+	}
+	if o == "" {
+		details = append(details, "onboarding_id is required")
+	}
+	return u, o, details
+}
+
+func ValidateS3Key(s3Key string) (string, []string) {
+	k := strings.TrimSpace(s3Key)
+	if k == "" {
+		return "", []string{"s3_key is required"}
+	}
+	return k, nil
 }

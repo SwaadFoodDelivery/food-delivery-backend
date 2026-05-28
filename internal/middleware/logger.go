@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"food-delivery-backend/internal/constants"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -28,7 +30,7 @@ func StructuredLogger(log zerolog.Logger) gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 
-		userID, _ := c.Get(ContextUserIDKey)
+		userID, _ := c.Get(constants.AuthContextUserIDKey)
 		event := reqLog.Info()
 		status := c.Writer.Status()
 		if status >= 500 {

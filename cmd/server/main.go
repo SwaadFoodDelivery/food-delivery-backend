@@ -13,6 +13,7 @@ import (
 	"food-delivery-backend/infra/postgres"
 	"food-delivery-backend/infra/redis"
 	"food-delivery-backend/internal/app"
+	"food-delivery-backend/internal/constants"
 	grpcclient "food-delivery-backend/internal/grpc/client"
 	"food-delivery-backend/internal/router"
 	"food-delivery-backend/internal/services/common/otp"
@@ -24,14 +25,6 @@ import (
 	rds "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	kafkago "github.com/segmentio/kafka-go"
-)
-
-const (
-	startupDBTimeout        = 45 * time.Second
-	startupMigrationTimeout = 60 * time.Second
-	startupRedisTimeout     = 20 * time.Second
-	startupKafkaTimeout     = 20 * time.Second
-	startupGRPCTimeout      = 20 * time.Second
 )
 
 func main() {
@@ -50,7 +43,7 @@ func main() {
 	}
 
 	db, err := func() (*sqlx.DB, error) {
-		dbCtx, dbCancel := context.WithTimeout(startupCtx, startupDBTimeout)
+		dbCtx, dbCancel := context.WithTimeout(startupCtx, constants.StartupDBTimeout)
 		defer dbCancel()
 		return postgres.NewPostgresDB(dbCtx, cfg)
 	}()
@@ -59,14 +52,14 @@ func main() {
 	}
 
 	if err := func() error {
-		migrationCtx, migrationCancel := context.WithTimeout(startupCtx, startupMigrationTimeout)
+		migrationCtx, migrationCancel := context.WithTimeout(startupCtx, constants.StartupMigrationTimeout)
 		defer migrationCancel()
 		return postgres.RunMigrations(migrationCtx, db.DB, "./migrations")
 	}(); err != nil {
 		startupLog.Fatal().Err(err).Msg("migrations")
 	}
 	rdb, err := func() (*rds.Client, error) {
-		redisCtx, redisCancel := context.WithTimeout(startupCtx, startupRedisTimeout)
+		redisCtx, redisCancel := context.WithTimeout(startupCtx, constants.StartupRedisTimeout)
 		defer redisCancel()
 		return redis.NewRedisClient(redisCtx, cfg)
 	}()
@@ -74,7 +67,7 @@ func main() {
 		startupLog.Fatal().Err(err).Msg("redis")
 	}
 	kw, err := func() (*kafkago.Writer, error) {
-		kafkaCtx, kafkaCancel := context.WithTimeout(startupCtx, startupKafkaTimeout)
+		kafkaCtx, kafkaCancel := context.WithTimeout(startupCtx, constants.StartupKafkaTimeout)
 		defer kafkaCancel()
 		return kafka.NewProducer(kafkaCtx, cfg)
 	}()
@@ -82,7 +75,7 @@ func main() {
 		startupLog.Fatal().Err(err).Msg("kafka")
 	}
 	oc, err := func() (*grpcclient.OrderServiceClient, error) {
-		grpcCtx, grpcCancel := context.WithTimeout(startupCtx, startupGRPCTimeout)
+		grpcCtx, grpcCancel := context.WithTimeout(startupCtx, constants.StartupGRPCTimeout)
 		defer grpcCancel()
 		return grpcclient.NewOrderServiceClient(grpcCtx, cfg)
 	}()
@@ -92,9 +85,9 @@ func main() {
 
 	var otpProvider otp.Provider
 	switch cfg.OTP.Provider {
-	case "mock":
+	case constants.ProviderMock:
 		otpProvider = otp.NewMockProvider(log)
-	case "dev":
+	case constants.ProviderDev:
 		otpProvider = otp.NewTwilioProvider(cfg.OTP.AccountSID, cfg.OTP.AuthToken, cfg.OTP.FromPhone)
 	default:
 		startupLog.Fatal().Str("otp_provider", cfg.OTP.Provider).Msg("unsupported OTP_PROVIDER, use mock or dev")
@@ -102,9 +95,9 @@ func main() {
 
 	var storageProvider storage.Provider
 	switch cfg.S3.Provider {
-	case "mock":
+	case constants.ProviderMock:
 		storageProvider = storage.NewMockProvider(cfg.S3.MockBaseURL)
-	case "dev":
+	case constants.ProviderDev:
 		storageProvider = storage.NewDevProvider(cfg.S3.AccessKeyID, cfg.S3.SecretAccessKey, cfg.S3.Region, cfg.S3.Endpoint)
 	default:
 		startupLog.Fatal().Str("s3_provider", cfg.S3.Provider).Msg("unsupported S3_PROVIDER, use mock or dev")

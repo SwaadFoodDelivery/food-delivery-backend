@@ -4,6 +4,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"food-delivery-backend/internal/constants"
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/models"
 	"food-delivery-backend/pkg/utils"
@@ -102,7 +103,7 @@ func ValidateVerifyOTPBody(input map[string]any, c *gin.Context) (any, []middlew
 		req.OTP = otpCode
 	}
 
-	deviceID := strings.TrimSpace(c.GetHeader("X-Device-ID"))
+	deviceID := strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID))
 	if deviceID == "" || len(deviceID) > 255 {
 		details = append(details, middleware.ValidationDetail{Field: "device_id", Message: "header X-Device-ID is required and max length is 255"})
 	}
@@ -124,7 +125,7 @@ func getString(in map[string]any, key string) string {
 
 func validRole(role string) bool {
 	switch role {
-	case "client", "restaurant_owner", "restaurant_manager", "driver":
+	case constants.RoleClient, constants.RoleRestaurantOwner, constants.RoleRestaurantManager, constants.RoleDriver:
 		return true
 	default:
 		return false

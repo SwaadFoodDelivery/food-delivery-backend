@@ -3,8 +3,9 @@ package handler
 import (
 	"net/http"
 	"strings"
-	"time"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/business"
 	"food-delivery-backend/internal/services/users/models"
@@ -23,7 +24,7 @@ func NewAuthHandler(svc business.AuthService) *AuthHandler {
 func (h *AuthHandler) CheckPhone(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.CheckPhoneRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
@@ -37,21 +38,21 @@ func (h *AuthHandler) CheckPhone(c *gin.Context) {
 		return
 	}
 
-	if out.Registered && out.AccountStatus == "suspended" {
+	if out.Registered && out.AccountStatus == constants.AccountStatusSuspended {
 		c.JSON(http.StatusOK, gin.H{
-			"status":     "error",
-			"error_code": "ACCOUNT_SUSPENDED",
+			"status":     constants.ResponseStatusError,
+			"error_code": apperrors.CodeAccountSuspended,
 			"data":       out,
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.RegisterRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
@@ -61,49 +62,49 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:        req.Email,
 		ReferralCode: req.ReferralCode,
 		Role:         req.Role,
-		DeviceID:     strings.TrimSpace(c.GetHeader("X-Device-ID")),
+		DeviceID:     strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
 		IPAddress:    c.ClientIP(),
 	})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *AuthHandler) SendOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.SendOTPRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
 	out, svcErr := h.svc.SendOTP(c.Request.Context(), models.SendOTPInput{
 		Phone:     req.Phone,
-		DeviceID:  strings.TrimSpace(c.GetHeader("X-Device-ID")),
+		DeviceID:  strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
 		IPAddress: c.ClientIP(),
 	})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.VerifyOTPRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
-	clientType := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Client-Type")))
+	clientType := strings.ToLower(strings.TrimSpace(c.GetHeader(constants.HeaderClientType)))
 	out, svcErr := h.svc.VerifyOTP(c.Request.Context(), models.VerifyOTPInput{
 		Phone:      req.Phone,
 		OTP:        req.OTP,
-		DeviceID:   strings.TrimSpace(c.GetHeader("X-Device-ID")),
+		DeviceID:   strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
 		IPAddress:  c.ClientIP(),
-		Platform:   strings.ToLower(strings.TrimSpace(c.GetHeader("X-Platform"))),
+		Platform:   strings.ToLower(strings.TrimSpace(c.GetHeader(constants.HeaderPlatform))),
 		ClientType: clientType,
 	})
 	if svcErr != nil {
@@ -111,18 +112,18 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		return
 	}
 
-	if clientType == "web" {
-		c.SetCookie("refresh_token", out.RefreshToken, int((30 * time.Hour * 24).Seconds()), "/", "", true, true)
+	if clientType == constants.PlatformWeb {
+		c.SetCookie("refresh_token", out.RefreshToken, int(constants.AuthRefreshTokenTTL.Seconds()), "/", "", true, true)
 		out.RefreshToken = ""
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	sessionID, _ := c.Get(middleware.ContextSessionIDKey)
-	userID, _ := c.Get(middleware.ContextUserIDKey)
-	role, _ := c.Get(middleware.ContextRoleKey)
+	sessionID, _ := c.Get(constants.AuthContextSessionIDKey)
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	role, _ := c.Get(constants.AuthContextRoleKey)
 
 	svcErr := h.svc.Logout(c.Request.Context(), models.LogoutInput{
 		SessionID: toString(sessionID),
@@ -133,12 +134,12 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": gin.H{"message": "Logged out successfully"}})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": gin.H{"message": "Logged out successfully"}})
 }
 
 func writeServiceError(c *gin.Context, err *models.ServiceError) {
 	c.JSON(err.StatusCode, gin.H{
-		"status":     "error",
+		"status":     constants.ResponseStatusError,
 		"error_code": err.Code,
 		"message":    err.Message,
 		"details":    err.Details,

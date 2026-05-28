@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -93,10 +95,10 @@ func LeakyBucketRateLimit(rc *rds.Client, scope string, rate float64, capacity i
 		if retryAfterSeconds < 1 {
 			retryAfterSeconds = 1
 		}
-		c.Header("Retry-After", strconv.Itoa(retryAfterSeconds))
+		c.Header(constants.HeaderRetryAfter, strconv.Itoa(retryAfterSeconds))
 		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-			"status":     "error",
-			"error_code": "RATE_LIMIT_EXCEEDED",
+			"status":     constants.ResponseStatusError,
+			"error_code": apperrors.CodeRateLimited,
 			"message":    "Too many requests. Please try again later.",
 			"details":    []string{},
 		})
@@ -128,7 +130,7 @@ func PhoneRoleKeyFunc(c *gin.Context) string {
 }
 
 func UserIDKeyFunc(c *gin.Context) string {
-	raw, _ := c.Get(ContextUserIDKey)
+	raw, _ := c.Get(constants.AuthContextUserIDKey)
 	userID, _ := raw.(string)
 	return strings.TrimSpace(userID)
 }
@@ -168,7 +170,7 @@ func parseJSONBody(c *gin.Context) (map[string]any, bool) {
 func normalizeRoleForRateLimit(role string) string {
 	role = strings.ToLower(strings.TrimSpace(role))
 	switch role {
-	case "client", "restaurant_owner", "restaurant_manager", "driver":
+	case constants.RoleClient, constants.RoleRestaurantOwner, constants.RoleRestaurantManager, constants.RoleDriver:
 		return role
 	default:
 		return ""

@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"food-delivery-backend/internal/app"
-	"food-delivery-backend/internal/middleware"
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/common/storage"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,7 @@ func NewUploadsHandler(deps *app.Container) *UploadsHandler {
 
 type presignRequest struct {
 	Bucket      string `json:"bucket"`
+	Purpose     string `json:"purpose"`
 	Key         string `json:"key"`
 	Entity      string `json:"entity"`
 	Onboarding  string `json:"onboarding_id"`
@@ -34,29 +36,29 @@ type presignRequest struct {
 
 func (h *UploadsHandler) PresignURL(c *gin.Context) {
 	if h.storage == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "STORAGE_NOT_CONFIGURED", "message": "storage provider is not configured", "details": []string{}})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeOnboardingStorageNotConfigured, "message": "storage provider is not configured", "details": []string{}})
 		return
 	}
 
 	var req presignRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
-	userID, _ := c.Get(middleware.ContextUserIDKey)
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
 	ownerPrefix := "users/" + strings.TrimSpace(toString(userID)) + "/"
 	if ownerPrefix == "users//" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "error_code": "UNAUTHORIZED", "message": "user context missing", "details": []string{}})
+		c.JSON(http.StatusUnauthorized, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeUnauthorized, "message": "user context missing", "details": []string{}})
 		return
 	}
 
 	bucket := strings.TrimSpace(req.Bucket)
 	if bucket == "" {
-		bucket = strings.TrimSpace(h.deps.Config.S3.Bucket)
+		bucket = h.deps.Config.S3BucketFor(bucketPurpose(req))
 	}
 	if bucket == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "bucket is required", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "bucket is required", "details": []string{}})
 		return
 	}
 
@@ -68,7 +70,7 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 	key := strings.TrimSpace(req.Key)
 	if key == "" {
 		if strings.TrimSpace(req.Entity) != "onboarding" || strings.TrimSpace(req.Onboarding) == "" || strings.TrimSpace(req.Document) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "either key or (entity=onboarding, onboarding_id, document_type) is required", "details": []string{}})
+			c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "either key or (entity=onboarding, onboarding_id, document_type) is required", "details": []string{}})
 			return
 		}
 		ext := strings.Trim(strings.TrimSpace(req.Extension), ".")
@@ -80,7 +82,7 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 	}
 
 	if !strings.HasPrefix(key, ownerPrefix) {
-		c.JSON(http.StatusForbidden, gin.H{"status": "error", "error_code": "INVALID_OBJECT_KEY", "message": "object key must be owner scoped", "details": []string{}})
+		c.JSON(http.StatusForbidden, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeOnboardingInvalidObjectKey, "message": "object key must be owner scoped", "details": []string{}})
 		return
 	}
 
@@ -92,12 +94,12 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 		ExpiresIn:   time.Duration(h.deps.Config.S3.PresignTTLSeconds) * time.Second,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "PRESIGN_FAILED", "message": err.Error(), "details": []string{}})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeOnboardingPresignFailed, "message": err.Error(), "details": []string{}})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
+		"status": constants.ResponseStatusSuccess,
 		"data": gin.H{
 			"bucket":     bucket,
 			"key":        key,
@@ -107,6 +109,17 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 			"expires_at": out.ExpiresAt.Format(time.RFC3339),
 		},
 	})
+}
+
+func bucketPurpose(req presignRequest) string {
+	purpose := strings.ToLower(strings.TrimSpace(req.Purpose))
+	if purpose != "" {
+		return purpose
+	}
+	if strings.TrimSpace(req.Entity) == constants.S3BucketPurposeOnboarding {
+		return constants.S3BucketPurposeOnboarding
+	}
+	return constants.S3BucketPurposeDefault
 }
 
 func cleanObjectKey(key string) string {

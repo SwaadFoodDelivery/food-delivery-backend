@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"math/big"
 
+	"food-delivery-backend/internal/constants"
+
 	"golang.org/x/crypto/bcrypt"
 )
-
-const otpHashCost = 12
 
 func GenerateOTP() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(900000))
@@ -19,7 +19,7 @@ func GenerateOTP() (string, error) {
 }
 
 func HashOTP(otp string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(otp), otpHashCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(otp), constants.AuthOTPHashCost)
 	if err != nil {
 		return "", err
 	}

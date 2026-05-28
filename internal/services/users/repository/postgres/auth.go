@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	usererrors "food-delivery-backend/internal/services/users/errors"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/users/models"
 
 	"github.com/jmoiron/sqlx"
@@ -210,7 +210,7 @@ func (s *Store) DeactivateSession(ctx context.Context, sessionID string) error {
 
 func mapNotFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
-		return usererrors.ErrNotFound
+		return apperrors.ErrNotFound
 	}
 	return err
 }

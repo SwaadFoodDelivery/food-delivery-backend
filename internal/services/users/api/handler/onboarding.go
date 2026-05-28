@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/business"
 	"food-delivery-backend/internal/services/users/models"
@@ -22,14 +24,14 @@ func NewOnboardingHandler(svc business.OnboardingService) *OnboardingHandler {
 func (h *OnboardingHandler) Init(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.InitOnboardingRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
-	userID, _ := c.Get(middleware.ContextUserIDKey)
-	role, _ := c.Get(middleware.ContextRoleKey)
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	role, _ := c.Get(constants.AuthContextRoleKey)
 	if strings.TrimSpace(req.Role) != "" && strings.TrimSpace(req.Role) != strings.TrimSpace(toString(role)) {
-		c.JSON(http.StatusForbidden, gin.H{"status": "error", "error_code": "ROLE_MISMATCH", "message": "requested role does not match authenticated role", "details": []string{}})
+		c.JSON(http.StatusForbidden, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeRoleMismatch, "message": "requested role does not match authenticated role", "details": []string{}})
 		return
 	}
 
@@ -42,11 +44,11 @@ func (h *OnboardingHandler) Init(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *OnboardingHandler) Submit(c *gin.Context) {
-	userID, _ := c.Get(middleware.ContextUserIDKey)
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
 	onboardingID := strings.TrimSpace(c.Param("id"))
 
 	out, svcErr := h.svc.SubmitOnboarding(c.Request.Context(), models.SubmitOnboardingInput{
@@ -57,11 +59,11 @@ func (h *OnboardingHandler) Submit(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *OnboardingHandler) Resubmit(c *gin.Context) {
-	userID, _ := c.Get(middleware.ContextUserIDKey)
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
 	onboardingID := strings.TrimSpace(c.Param("id"))
 
 	out, svcErr := h.svc.ResubmitOnboarding(c.Request.Context(), models.ResubmitOnboardingInput{
@@ -72,13 +74,13 @@ func (h *OnboardingHandler) Resubmit(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": out})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
 func (h *OnboardingHandler) MarkUploaded(c *gin.Context) {
 	body, ok := middleware.GetValidatedBody[map[string]string](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "VALIDATION_ERROR", "message": "invalid request body", "details": []string{}})
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
 		return
 	}
 
@@ -87,5 +89,5 @@ func (h *OnboardingHandler) MarkUploaded(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": gin.H{"updated": true}})
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": gin.H{"updated": true}})
 }

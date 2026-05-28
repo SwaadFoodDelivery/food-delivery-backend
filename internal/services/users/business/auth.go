@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/common/otp"
 	"food-delivery-backend/internal/services/common/storage"
 	"food-delivery-backend/internal/services/users/models"
@@ -15,20 +17,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-)
-
-const (
-	otpTTL               = 10 * time.Minute
-	sessionTTL           = 24 * time.Hour
-	authRateWindow       = time.Hour
-	maxOTPRatePerPhone   = 5
-	maxOTPAttempts       = 5
-	otpBlockedWindow     = 30 * time.Minute
-	accessTokenTTL       = 15 * time.Minute
-	refreshTokenTTL      = 30 * 24 * time.Hour
-	notFoundProbeTTL     = time.Minute
-	captchaRequiredTTL   = 10 * time.Minute
-	notFoundProbeMaxHits = 3
 )
 
 type AuthService interface {
@@ -54,7 +42,7 @@ func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logg
 func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*models.CheckPhoneOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
-		return nil, badRequest("INVALID_PHONE", err.Error())
+		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())
 	}
 	role := strings.TrimSpace(in.Role)
 
@@ -66,7 +54,7 @@ func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 				Message:    "Account not found. Please register.",
 			}
 			if in.IP != "" {
-				captchaRequired, probeErr := s.repo.IncrementNotFoundProbe(ctx, in.IP, notFoundProbeMaxHits, notFoundProbeTTL, captchaRequiredTTL)
+				captchaRequired, probeErr := s.repo.IncrementNotFoundProbe(ctx, in.IP, constants.AuthNotFoundProbeMaxHits, constants.AuthNotFoundProbeTTL, constants.AuthCaptchaRequiredTTL)
 				if probeErr != nil {
 					return nil, internalErr("failed to process auth probe")
 				}
@@ -80,10 +68,10 @@ func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 		return nil, internalErr("failed to lookup phone")
 	}
 
-	if user.AccountStatus == "suspended" {
+	if user.AccountStatus == constants.AccountStatusSuspended {
 		return &models.CheckPhoneOutput{
 			Registered:    true,
-			AccountStatus: "suspended",
+			AccountStatus: constants.AccountStatusSuspended,
 			Message:       "Your account has been suspended. Please contact support.",
 		}, nil
 	}
@@ -98,10 +86,10 @@ func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
-		return nil, badRequest("INVALID_PHONE", err.Error())
+		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())
 	}
 	if strings.TrimSpace(in.Name) == "" || len(strings.TrimSpace(in.Name)) > 100 {
-		return nil, badRequest("VALIDATION_ERROR", "name must be non-empty and at most 100 chars")
+		return nil, badRequest(apperrors.CodeValidation, "name must be non-empty and at most 100 chars")
 	}
 	email := strings.TrimSpace(in.Email)
 
@@ -109,8 +97,8 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 	if err != nil {
 		return nil, internalErr("failed to check otp rate")
 	}
-	if rateCount >= maxOTPRatePerPhone {
-		return nil, tooManyRequests("RATE_LIMIT_EXCEEDED", "too many otp requests")
+	if rateCount >= constants.AuthMaxOTPRatePerPhone {
+		return nil, tooManyRequests(apperrors.CodeRateLimited, "too many otp requests")
 	}
 
 	exists, err := s.repo.UserExistsByPhoneRole(ctx, phone, in.Role)
@@ -118,7 +106,7 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 		return nil, internalErr("failed to check existing user")
 	}
 	if exists {
-		return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: "PHONE_ALREADY_REGISTERED", Message: "phone already registered", Details: []string{}}
+		return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodePhoneAlreadyRegistered, Message: "phone already registered", Details: []string{}}
 	}
 	if email != "" {
 		exists, err := s.repo.UserExistsByEmailRole(ctx, email, in.Role)
@@ -126,7 +114,7 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 			return nil, internalErr("failed to check existing email")
 		}
 		if exists {
-			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: "EMAIL_ALREADY_REGISTERED", Message: "email already registered for this role", Details: []string{}}
+			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeEmailAlreadyRegistered, Message: "email already registered for this role", Details: []string{}}
 		}
 	}
 
@@ -149,8 +137,8 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 		if err := tx.InsertAuditLog(ctx, repository.AuditLogInput{
 			ActorID:    userID,
 			ActorRole:  in.Role,
-			Action:     "create",
-			EntityType: "users",
+			Action:     constants.AuditActionCreate,
+			EntityType: constants.EntityTypeUsers,
 			EntityID:   userID,
 		}); err != nil {
 			return err
@@ -165,7 +153,7 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 		}); err != nil {
 			return err
 		}
-		if err := tx.SetOTPHashAndRate(ctx, phone, hash, otpTTL, authRateWindow); err != nil {
+		if err := tx.SetOTPHashAndRate(ctx, phone, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
 			return err
 		}
 		return nil
@@ -184,32 +172,32 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.OTPSendOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
-		return nil, badRequest("INVALID_PHONE", err.Error())
+		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())
 	}
 
 	user, err := s.repo.FindUserByPhone(ctx, phone)
 	if err != nil {
 		if repository.IsNotFound(err) {
-			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: "USER_NOT_FOUND", Message: "user not found", Details: []string{}}
+			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeUserNotFound, Message: "user not found", Details: []string{}}
 		}
 		return nil, internalErr("failed to find user")
 	}
-	if user.AccountStatus == "suspended" {
-		return nil, &models.ServiceError{StatusCode: http.StatusForbidden, Code: "ACCOUNT_SUSPENDED", Message: "account suspended", Details: []string{}}
+	if user.AccountStatus == constants.AccountStatusSuspended {
+		return nil, &models.ServiceError{StatusCode: http.StatusForbidden, Code: apperrors.CodeAccountSuspended, Message: "account suspended", Details: []string{}}
 	}
 
 	rateCount, err := s.repo.GetOTPRateCount(ctx, phone)
 	if err != nil {
 		return nil, internalErr("failed to check otp rate")
 	}
-	if rateCount >= maxOTPRatePerPhone {
-		return nil, tooManyRequests("RATE_LIMIT_EXCEEDED", "too many otp requests")
+	if rateCount >= constants.AuthMaxOTPRatePerPhone {
+		return nil, tooManyRequests(apperrors.CodeRateLimited, "too many otp requests")
 	}
 
 	otpRec, err := s.repo.FindLatestActiveOTPByPhone(ctx, phone)
 	if err == nil {
-		if otpRec.ResendCount >= maxOTPRatePerPhone {
-			return nil, tooManyRequests("RATE_LIMIT_EXCEEDED", "otp resend limit exceeded")
+		if otpRec.ResendCount >= constants.AuthMaxOTPRatePerPhone {
+			return nil, tooManyRequests(apperrors.CodeRateLimited, "otp resend limit exceeded")
 		}
 		if err := s.repo.IncrementOTPResendCount(ctx, otpRec.OTPID); err != nil {
 			return nil, internalErr("failed to update otp resend count")
@@ -232,7 +220,7 @@ func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 	}); err != nil {
 		return nil, internalErr("failed to create otp request")
 	}
-	if err := s.repo.SetOTPHashAndRate(ctx, phone, hash, otpTTL, authRateWindow); err != nil {
+	if err := s.repo.SetOTPHashAndRate(ctx, phone, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
 		return nil, internalErr("failed to store otp cache")
 	}
 
@@ -246,41 +234,41 @@ func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*models.VerifyOTPOutput, *models.ServiceError) {
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
-		return nil, badRequest("INVALID_PHONE", err.Error())
+		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())
 	}
 	if strings.TrimSpace(in.DeviceID) == "" {
-		return nil, badRequest("VALIDATION_ERROR", "device_id is required")
+		return nil, badRequest(apperrors.CodeValidation, "device_id is required")
 	}
 	if !utils.ValidateOTP(in.OTP) {
-		return nil, badRequest("VALIDATION_ERROR", "otp must be exactly 6 digits")
+		return nil, badRequest(apperrors.CodeValidation, "otp must be exactly 6 digits")
 	}
 
 	otpRec, err := s.repo.FindLatestUnverifiedOTPByPhoneDevice(ctx, phone, in.DeviceID)
 	if err != nil {
 		if repository.IsNotFound(err) {
-			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: "OTP_INVALID", Message: "invalid otp", Details: []string{}}
+			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid otp", Details: []string{}}
 		}
 		return nil, internalErr("failed to fetch otp request")
 	}
 
 	now := time.Now().UTC()
 	if otpRec.BlockedUntil != nil && otpRec.BlockedUntil.After(now) {
-		return nil, tooManyRequests("OTP_MAX_ATTEMPTS", "otp max attempts reached")
+		return nil, tooManyRequests(apperrors.CodeOTPMaxAttempts, "otp max attempts reached")
 	}
-	if otpRec.Attempts >= maxOTPAttempts {
-		if err := s.repo.SetOTPBlockedUntil(ctx, otpRec.OTPID, now.Add(otpBlockedWindow)); err != nil {
+	if otpRec.Attempts >= constants.AuthMaxOTPAttempts {
+		if err := s.repo.SetOTPBlockedUntil(ctx, otpRec.OTPID, now.Add(constants.AuthOTPBlockedWindow)); err != nil {
 			return nil, internalErr("failed to block otp attempts")
 		}
-		return nil, tooManyRequests("OTP_MAX_ATTEMPTS", "otp max attempts reached")
+		return nil, tooManyRequests(apperrors.CodeOTPMaxAttempts, "otp max attempts reached")
 	}
 
 	if otpRec.ExpiresAt.Before(now) {
 		_ = s.repo.IncrementOTPAttempts(ctx, otpRec.OTPID)
-		return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: "OTP_EXPIRED", Message: "otp expired", Details: []string{}}
+		return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "otp expired", Details: []string{}}
 	}
 	if !utils.CompareOTP(otpRec.OTPHash, in.OTP) {
 		_ = s.repo.IncrementOTPAttempts(ctx, otpRec.OTPID)
-		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: "OTP_INVALID", Message: "invalid otp", Details: []string{}}
+		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid otp", Details: []string{}}
 	}
 	if otpRec.UserID == nil || *otpRec.UserID == "" {
 		return nil, internalErr("otp has no user mapping")
@@ -288,7 +276,7 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 
 	sessionID := uuid.NewString()
 	platform := normalizePlatform(in.Platform)
-	expiresAt := now.Add(sessionTTL)
+	expiresAt := now.Add(constants.AuthSessionTTL)
 	var user *models.UserRow
 
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
@@ -318,8 +306,8 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 		if err := tx.InsertAuditLog(ctx, repository.AuditLogInput{
 			ActorID:    user.UserID,
 			ActorRole:  user.Role,
-			Action:     "login",
-			EntityType: "sessions",
+			Action:     constants.AuditActionLogin,
+			EntityType: constants.EntityTypeSessions,
 			EntityID:   sessionID,
 		}); err != nil {
 			return err
@@ -334,7 +322,7 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 			DeviceID:  in.DeviceID,
 			IPAddress: in.IPAddress,
 			Platform:  platform,
-		}, sessionTTL); err != nil {
+		}, constants.AuthSessionTTL); err != nil {
 			return err
 		}
 		return nil
@@ -343,11 +331,11 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 		return nil, internalErr("failed to verify otp")
 	}
 
-	accessToken, err := utils.CreateAccessToken(s.cfg.JWT.Secret, user.UserID, user.Role, sessionID, accessTokenTTL)
+	accessToken, err := utils.CreateAccessToken(s.cfg.JWT.Secret, user.UserID, user.Role, sessionID, constants.AuthAccessTokenTTL)
 	if err != nil {
 		return nil, internalErr("failed to sign access token")
 	}
-	refreshToken, err := utils.CreateRefreshToken(s.cfg.JWT.Secret, user.UserID, sessionID, refreshTokenTTL)
+	refreshToken, err := utils.CreateRefreshToken(s.cfg.JWT.Secret, user.UserID, sessionID, constants.AuthRefreshTokenTTL)
 	if err != nil {
 		return nil, internalErr("failed to sign refresh token")
 	}
@@ -360,8 +348,8 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 	out := &models.VerifyOTPOutput{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int(accessTokenTTL.Seconds()),
+		TokenType:    constants.BearerTokenType,
+		ExpiresIn:    int(constants.AuthAccessTokenTTL.Seconds()),
 		User: models.VerifiedUser{
 			UserID:        user.UserID,
 			Name:          user.Name,
@@ -389,7 +377,7 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 
 func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError {
 	if strings.TrimSpace(in.SessionID) == "" || strings.TrimSpace(in.UserID) == "" {
-		return badRequest("VALIDATION_ERROR", "missing session or user id")
+		return badRequest(apperrors.CodeValidation, "missing session or user id")
 	}
 
 	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
@@ -399,8 +387,8 @@ func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.Ser
 		return tx.InsertAuditLog(ctx, repository.AuditLogInput{
 			ActorID:    in.UserID,
 			ActorRole:  in.Role,
-			Action:     "logout",
-			EntityType: "sessions",
+			Action:     constants.AuditActionLogout,
+			EntityType: constants.EntityTypeSessions,
 			EntityID:   in.SessionID,
 		})
 	})
@@ -427,7 +415,7 @@ func createOTPBundle() (string, string, time.Time, *models.ServiceError) {
 	if err != nil {
 		return "", "", time.Time{}, internalErr("failed to hash otp")
 	}
-	expiresAt := time.Now().UTC().Add(otpTTL)
+	expiresAt := time.Now().UTC().Add(constants.AuthOTPTTL)
 	return otpCode, hash, expiresAt, nil
 }
 
@@ -442,10 +430,10 @@ func otpResponse(phone string, expiresAt time.Time) *models.OTPSendOutput {
 
 func normalizePlatform(platform string) string {
 	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case "android", "ios", "web":
+	case constants.PlatformAndroid, constants.PlatformIOS, constants.PlatformWeb:
 		return strings.ToLower(strings.TrimSpace(platform))
 	default:
-		return "web"
+		return constants.PlatformWeb
 	}
 }
 
@@ -458,5 +446,5 @@ func tooManyRequests(code, msg string) *models.ServiceError {
 }
 
 func internalErr(msg string) *models.ServiceError {
-	return &models.ServiceError{StatusCode: http.StatusInternalServerError, Code: "INTERNAL_ERROR", Message: msg, Details: []string{}}
+	return &models.ServiceError{StatusCode: http.StatusInternalServerError, Code: apperrors.CodeInternal, Message: msg, Details: []string{}}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"food-delivery-backend/internal/constants"
 	"food-delivery-backend/internal/services/users/models"
 
 	"github.com/jmoiron/sqlx"
@@ -74,8 +75,8 @@ func (s *Store) CountPendingOnboardingDocuments(ctx context.Context, onboardingI
 		SELECT COUNT(*)
 		FROM onboarding_documents
 		WHERE onboarding_id = $1::uuid
-		  AND upload_status <> 'uploaded'
-	`, onboardingID)
+		  AND upload_status <> $2
+	`, onboardingID, constants.OnboardingUploadStatusUploaded)
 	return count, err
 }
 
@@ -97,10 +98,10 @@ func (s *Store) UpdateOnboardingStatus(ctx context.Context, onboardingID, status
 func (s *Store) MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, s3Key string) (bool, error) {
 	res, err := s.accessor.Execer().ExecContext(ctx, `
 		UPDATE onboarding_documents
-		SET upload_status = 'uploaded', updated_at = NOW()
+		SET upload_status = $2, updated_at = NOW()
 		WHERE s3_key = $1
-		  AND upload_status <> 'uploaded'
-	`, s3Key)
+		  AND upload_status <> $2
+	`, s3Key, constants.OnboardingUploadStatusUploaded)
 	if err != nil {
 		return false, err
 	}
