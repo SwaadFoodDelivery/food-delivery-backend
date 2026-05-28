@@ -152,6 +152,7 @@ services:
       S3_SECRET_ACCESS_KEY: minioadmin
       S3_PRESIGN_TTL_SECONDS: "300"
       ORDER_GRPC_ADDR: host.docker.internal:50051
+      ORDER_GRPC_REQUIRED: "false"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

@@ -53,7 +53,8 @@ type Config struct {
 		MockBaseURL       string
 	}
 	GRPC struct {
-		OrderAddr string
+		OrderAddr     string
+		OrderRequired bool
 	}
 	RateLimit struct {
 		DefaultPerMin int
@@ -114,6 +115,7 @@ func Load() (*Config, error) {
 	cfg.S3.PresignTTLSeconds = viper.GetInt("S3_PRESIGN_TTL_SECONDS")
 	cfg.S3.MockBaseURL = strings.TrimSpace(viper.GetString("S3_MOCK_BASE_URL"))
 	cfg.GRPC.OrderAddr = viper.GetString("ORDER_GRPC_ADDR")
+	cfg.GRPC.OrderRequired = viper.GetBool("ORDER_GRPC_REQUIRED")
 	cfg.RateLimit.DefaultPerMin = viper.GetInt("RATE_LIMIT_DEFAULT_PER_MIN")
 	cfg.RateLimit.WindowSec = viper.GetInt("RATE_LIMIT_WINDOW_SEC")
 	if cfg.App.Port == "" {

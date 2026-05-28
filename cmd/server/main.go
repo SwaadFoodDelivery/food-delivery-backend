@@ -74,14 +74,7 @@ func main() {
 	if err != nil {
 		startupLog.Fatal().Err(err).Msg("kafka")
 	}
-	oc, err := func() (*grpcclient.OrderServiceClient, error) {
-		grpcCtx, grpcCancel := context.WithTimeout(startupCtx, constants.StartupGRPCTimeout)
-		defer grpcCancel()
-		return grpcclient.NewOrderServiceClient(grpcCtx, cfg)
-	}()
-	if err != nil {
-		startupLog.Fatal().Err(err).Msg("grpc")
-	}
+	oc := initOrderClient(startupCtx, startupLog, cfg)
 
 	var otpProvider otp.Provider
 	switch cfg.OTP.Provider {
@@ -136,5 +129,21 @@ func main() {
 	_ = kw.Close()
 	_ = db.Close()
 	_ = rdb.Close()
-	_ = oc.Close()
+	if oc != nil {
+		_ = oc.Close()
+	}
+}
+
+func initOrderClient(ctx context.Context, log *zerolog.Logger, cfg *config.Config) *grpcclient.OrderServiceClient {
+	if !cfg.GRPC.OrderRequired {
+		log.Warn().Str("addr", cfg.GRPC.OrderAddr).Msg("grpc order client skipped because ORDER_GRPC_REQUIRED=false")
+		return nil
+	}
+	grpcCtx, grpcCancel := context.WithTimeout(ctx, constants.StartupGRPCTimeout)
+	defer grpcCancel()
+	oc, err := grpcclient.NewOrderServiceClient(grpcCtx, cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("grpc")
+	}
+	return oc
 }

@@ -33,7 +33,12 @@ func NewOrderServiceClient(ctx context.Context, cfg *config.Config) (*OrderServi
 	return &OrderServiceClient{conn: conn}, nil
 }
 
-func (c *OrderServiceClient) Close() error { return c.conn.Close() }
+func (c *OrderServiceClient) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	return c.conn.Close()
+}
 func (c *OrderServiceClient) PlaceOrder(ctx context.Context, in any) (any, error) {
 	_ = ctx
 	return in, nil
