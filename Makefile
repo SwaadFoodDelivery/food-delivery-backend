@@ -8,7 +8,7 @@ BACKEND_CONTAINER ?= food-delivery-backend
 POSTGRES_DB ?= food_delivery
 POSTGRES_USER ?= postgres
 
-.PHONY: compose-up compose-down compose-logs compose-ps compose-restart compose-build up down logs reset run test lint \
+.PHONY: compose-up compose-down compose-logs compose-ps compose-restart compose-build up down logs reset reset-volumes run test lint \
 postgres-connect postgres-shell redis-connect redis-monitor redis-flushall \
 kafka-logs zookeeper-logs backend-logs minio-logs service-logs \
 backend-shell minio-shell
@@ -38,6 +38,16 @@ down: compose-down
 logs: compose-logs
 
 reset:
+	docker compose -f $(COMPOSE_FILE) down --remove-orphans
+	docker compose -f $(COMPOSE_FILE) up -d --build
+
+reset-volumes:
+	@if [ "$(CONFIRM)" != "DELETE_DATA" ]; then \
+		echo "Refusing to delete local data volumes."; \
+		echo "This removes Postgres, Redis, and MinIO persisted data."; \
+		echo "Run: make reset-volumes CONFIRM=DELETE_DATA"; \
+		exit 1; \
+	fi
 	docker compose -f $(COMPOSE_FILE) down -v --remove-orphans
 	docker compose -f $(COMPOSE_FILE) up -d --build
 

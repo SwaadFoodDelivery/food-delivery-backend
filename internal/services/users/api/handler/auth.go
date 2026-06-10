@@ -120,6 +120,37 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
 }
 
+func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	out, svcErr := h.svc.SendEmailOTP(c.Request.Context(), models.SendEmailOTPInput{
+		UserID: toString(userID),
+	})
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+}
+
+func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	req, ok := middleware.GetValidatedBody[models.VerifyEmailRequest](c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		return
+	}
+
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	out, svcErr := h.svc.VerifyEmail(c.Request.Context(), models.VerifyEmailInput{
+		UserID: toString(userID),
+		OTP:    req.OTP,
+	})
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+}
+
 func (h *AuthHandler) Logout(c *gin.Context) {
 	sessionID, _ := c.Get(constants.AuthContextSessionIDKey)
 	userID, _ := c.Get(constants.AuthContextUserIDKey)

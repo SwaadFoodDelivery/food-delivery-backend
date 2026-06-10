@@ -2,6 +2,7 @@ package app
 
 import (
 	"food-delivery-backend/internal/grpc/client"
+	"food-delivery-backend/internal/services/common/email"
 	"food-delivery-backend/internal/services/common/otp"
 	"food-delivery-backend/internal/services/common/storage"
 	"food-delivery-backend/pkg/config"
@@ -20,5 +21,6 @@ type Container struct {
 	KafkaWriter     *kafka.Writer
 	OrderClient     *client.OrderServiceClient
 	OTPProvider     otp.Provider
+	EmailProvider   email.Provider
 	StorageProvider storage.Provider
 }

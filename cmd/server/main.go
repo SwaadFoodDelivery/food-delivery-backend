@@ -16,6 +16,7 @@ import (
 	"food-delivery-backend/internal/constants"
 	grpcclient "food-delivery-backend/internal/grpc/client"
 	"food-delivery-backend/internal/router"
+	"food-delivery-backend/internal/services/common/email"
 	"food-delivery-backend/internal/services/common/otp"
 	"food-delivery-backend/internal/services/common/storage"
 	"food-delivery-backend/pkg/config"
@@ -86,6 +87,14 @@ func main() {
 		startupLog.Fatal().Str("otp_provider", cfg.OTP.Provider).Msg("unsupported OTP_PROVIDER, use mock or dev")
 	}
 
+	var emailProvider email.Provider
+	switch cfg.Email.Provider {
+	case constants.ProviderMock:
+		emailProvider = email.NewMockProvider(log)
+	default:
+		startupLog.Fatal().Str("email_provider", cfg.Email.Provider).Msg("unsupported EMAIL_PROVIDER, use mock")
+	}
+
 	var storageProvider storage.Provider
 	switch cfg.S3.Provider {
 	case constants.ProviderMock:
@@ -104,6 +113,7 @@ func main() {
 		KafkaWriter:     kw,
 		OrderClient:     oc,
 		OTPProvider:     otpProvider,
+		EmailProvider:   emailProvider,
 		StorageProvider: storageProvider,
 	}
 	eng := router.NewRouter(deps)

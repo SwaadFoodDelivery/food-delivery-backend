@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appredis "food-delivery-backend/infra/redis"
+	apperrors "food-delivery-backend/internal/errors"
 
 	rds "github.com/redis/go-redis/v9"
 )
@@ -81,6 +82,65 @@ func (s *Store) ExpireOTP(ctx context.Context, phone string, ttl time.Duration) 
 
 func (s *Store) DeleteOTP(ctx context.Context, phone string) error {
 	return s.redis.Del(ctx, appredis.OTPKey(phone)).Err()
+}
+
+func (s *Store) GetEmailOTPRateCount(ctx context.Context, userID, email string) (int, error) {
+	val, err := s.redis.Get(ctx, appredis.EmailOTPRateKey(userID, email)).Result()
+	if err != nil {
+		if errors.Is(err, rds.Nil) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	count, convErr := strconv.Atoi(val)
+	if convErr != nil {
+		return 0, nil
+	}
+	return count, nil
+}
+
+func (s *Store) SetEmailOTPHashAndRate(ctx context.Context, userID, email, hash string, otpTTL, rateTTL time.Duration) error {
+	if err := s.redis.Set(ctx, appredis.EmailOTPKey(userID, email), hash, otpTTL).Err(); err != nil {
+		return err
+	}
+	if err := s.redis.Del(ctx, appredis.EmailOTPAttemptsKey(userID, email)).Err(); err != nil {
+		return err
+	}
+	cnt, err := s.redis.Incr(ctx, appredis.EmailOTPRateKey(userID, email)).Result()
+	if err != nil {
+		return err
+	}
+	if cnt == 1 {
+		_ = s.redis.Expire(ctx, appredis.EmailOTPRateKey(userID, email), rateTTL).Err()
+	}
+	return nil
+}
+
+func (s *Store) GetEmailOTPHash(ctx context.Context, userID, email string) (string, error) {
+	hash, err := s.redis.Get(ctx, appredis.EmailOTPKey(userID, email)).Result()
+	if err != nil {
+		if errors.Is(err, rds.Nil) {
+			return "", apperrors.ErrNotFound
+		}
+		return "", err
+	}
+	return hash, nil
+}
+
+func (s *Store) IncrementEmailOTPAttempts(ctx context.Context, userID, email string, ttl time.Duration) (int, error) {
+	key := appredis.EmailOTPAttemptsKey(userID, email)
+	cnt, err := s.redis.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	if cnt == 1 {
+		_ = s.redis.Expire(ctx, key, ttl).Err()
+	}
+	return int(cnt), nil
+}
+
+func (s *Store) DeleteEmailOTP(ctx context.Context, userID, email string) error {
+	return s.redis.Del(ctx, appredis.EmailOTPKey(userID, email), appredis.EmailOTPAttemptsKey(userID, email)).Err()
 }
 
 func (s *Store) SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error {

@@ -8,6 +8,8 @@ const (
 	CodeSessionRevoked         = "SESSION_REVOKED"
 	CodePhoneAlreadyRegistered = "PHONE_ALREADY_REGISTERED"
 	CodeEmailAlreadyRegistered = "EMAIL_ALREADY_REGISTERED"
+	CodeEmailAlreadyVerified   = "EMAIL_ALREADY_VERIFIED"
+	CodeEmailMissing           = "EMAIL_MISSING"
 	CodeAccountSuspended       = "ACCOUNT_SUSPENDED"
 	CodeOTPInvalid             = "OTP_INVALID"
 	CodeOTPMaxAttempts         = "OTP_MAX_ATTEMPTS"

@@ -30,6 +30,7 @@ type Repository interface {
 	SetOTPBlockedUntil(ctx context.Context, otpID string, blockedUntil time.Time) error
 	MarkOTPVerified(ctx context.Context, otpID string) error
 	MarkUserPhoneVerified(ctx context.Context, userID string) error
+	MarkUserEmailVerified(ctx context.Context, userID string) error
 	CountVerifiedOTPs(ctx context.Context, userID string) (int, error)
 
 	CreateSession(ctx context.Context, in CreateSessionInput) error
@@ -42,6 +43,11 @@ type Repository interface {
 	SetOTPHashAndRate(ctx context.Context, phone, hash string, otpTTL, rateTTL time.Duration) error
 	ExpireOTP(ctx context.Context, phone string, ttl time.Duration) error
 	DeleteOTP(ctx context.Context, phone string) error
+	GetEmailOTPRateCount(ctx context.Context, userID, email string) (int, error)
+	SetEmailOTPHashAndRate(ctx context.Context, userID, email, hash string, otpTTL, rateTTL time.Duration) error
+	GetEmailOTPHash(ctx context.Context, userID, email string) (string, error)
+	IncrementEmailOTPAttempts(ctx context.Context, userID, email string, ttl time.Duration) (int, error)
+	DeleteEmailOTP(ctx context.Context, userID, email string) error
 	SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error
 	DeleteSession(ctx context.Context, sessionID string) error
 
@@ -213,6 +219,10 @@ func (r *repo) MarkUserPhoneVerified(ctx context.Context, userID string) error {
 	return r.pg.MarkUserPhoneVerified(ctx, userID)
 }
 
+func (r *repo) MarkUserEmailVerified(ctx context.Context, userID string) error {
+	return r.pg.MarkUserEmailVerified(ctx, userID)
+}
+
 func (r *repo) CountVerifiedOTPs(ctx context.Context, userID string) (int, error) {
 	return r.pg.CountVerifiedOTPs(ctx, userID)
 }
@@ -243,6 +253,26 @@ func (r *repo) ExpireOTP(ctx context.Context, phone string, ttl time.Duration) e
 
 func (r *repo) DeleteOTP(ctx context.Context, phone string) error {
 	return r.cache.DeleteOTP(ctx, phone)
+}
+
+func (r *repo) GetEmailOTPRateCount(ctx context.Context, userID, email string) (int, error) {
+	return r.cache.GetEmailOTPRateCount(ctx, userID, email)
+}
+
+func (r *repo) SetEmailOTPHashAndRate(ctx context.Context, userID, email, hash string, otpTTL, rateTTL time.Duration) error {
+	return r.cache.SetEmailOTPHashAndRate(ctx, userID, email, hash, otpTTL, rateTTL)
+}
+
+func (r *repo) GetEmailOTPHash(ctx context.Context, userID, email string) (string, error) {
+	return r.cache.GetEmailOTPHash(ctx, userID, email)
+}
+
+func (r *repo) IncrementEmailOTPAttempts(ctx context.Context, userID, email string, ttl time.Duration) (int, error) {
+	return r.cache.IncrementEmailOTPAttempts(ctx, userID, email, ttl)
+}
+
+func (r *repo) DeleteEmailOTP(ctx context.Context, userID, email string) error {
+	return r.cache.DeleteEmailOTP(ctx, userID, email)
 }
 
 func (r *repo) SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error {

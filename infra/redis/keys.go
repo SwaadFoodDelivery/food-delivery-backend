@@ -22,6 +22,18 @@ func OTPRateKey(phone string) string {
 	return fmt.Sprintf(constants.RedisOTPRateLimitKeyPattern, phone)
 }
 
+func EmailOTPKey(userID, email string) string {
+	return fmt.Sprintf(constants.RedisEmailOTPKeyPattern, userID, email)
+}
+
+func EmailOTPAttemptsKey(userID, email string) string {
+	return fmt.Sprintf(constants.RedisEmailOTPAttemptsKeyPattern, userID, email)
+}
+
+func EmailOTPRateKey(userID, email string) string {
+	return fmt.Sprintf(constants.RedisEmailOTPRateLimitKeyPattern, userID, email)
+}
+
 func CaptchaRequiredKey(ip string) string {
 	return fmt.Sprintf(constants.RedisCaptchaRequiredKeyPattern, ip)
 }

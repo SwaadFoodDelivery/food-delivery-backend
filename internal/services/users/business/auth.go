@@ -3,11 +3,13 @@ package business
 import (
 	"context"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
 	"food-delivery-backend/internal/constants"
 	apperrors "food-delivery-backend/internal/errors"
+	"food-delivery-backend/internal/services/common/email"
 	"food-delivery-backend/internal/services/common/otp"
 	"food-delivery-backend/internal/services/common/storage"
 	"food-delivery-backend/internal/services/users/models"
@@ -24,6 +26,8 @@ type AuthService interface {
 	Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError)
 	SendOTP(ctx context.Context, in models.SendOTPInput) (*models.OTPSendOutput, *models.ServiceError)
 	VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*models.VerifyOTPOutput, *models.ServiceError)
+	SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput) (*models.EmailOTPSendOutput, *models.ServiceError)
+	VerifyEmail(ctx context.Context, in models.VerifyEmailInput) (*models.VerifyEmailOutput, *models.ServiceError)
 	Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError
 }
 
@@ -32,11 +36,12 @@ type Service struct {
 	cfg             *config.Config
 	log             zerolog.Logger
 	otpProvider     otp.Provider
+	emailProvider   email.Provider
 	storageProvider storage.Provider
 }
 
-func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logger, otpProvider otp.Provider, storageProvider storage.Provider) *Service {
-	return &Service{repo: repo, cfg: cfg, log: log, otpProvider: otpProvider, storageProvider: storageProvider}
+func NewService(repo repository.Repository, cfg *config.Config, log zerolog.Logger, otpProvider otp.Provider, emailProvider email.Provider, storageProvider storage.Provider) *Service {
+	return &Service{repo: repo, cfg: cfg, log: log, otpProvider: otpProvider, emailProvider: emailProvider, storageProvider: storageProvider}
 }
 
 func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*models.CheckPhoneOutput, *models.ServiceError) {
@@ -375,6 +380,63 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 	return out, nil
 }
 
+func (s *Service) SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput) (*models.EmailOTPSendOutput, *models.ServiceError) {
+	user, emailAddr, svcErr := s.emailVerificationUser(ctx, in.UserID)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if user.EmailVerified {
+		return emailOTPResponse(emailAddr, time.Now().UTC(), "Email is already verified", false), nil
+	}
+	if s.emailProvider == nil {
+		return nil, internalErr("email provider is not configured")
+	}
+	if svcErr := s.enforceEmailOTPRate(ctx, user.UserID, emailAddr); svcErr != nil {
+		return nil, svcErr
+	}
+
+	otpCode, hash, expiresAt, svcErr := createOTPBundle()
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if err := s.repo.SetEmailOTPHashAndRate(ctx, user.UserID, emailAddr, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
+		return nil, internalErr("failed to store email otp")
+	}
+	if err := s.emailProvider.SendVerificationOTP(ctx, emailAddr, otpCode); err != nil {
+		return nil, internalErr("failed to dispatch email otp")
+	}
+	return emailOTPResponse(emailAddr, expiresAt, "OTP sent to registered email and valid for 10 minutes", true), nil
+}
+
+func (s *Service) VerifyEmail(ctx context.Context, in models.VerifyEmailInput) (*models.VerifyEmailOutput, *models.ServiceError) {
+	user, emailAddr, svcErr := s.emailVerificationUser(ctx, in.UserID)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if user.EmailVerified {
+		return verifyEmailResponse(emailAddr, true, "Email is already verified"), nil
+	}
+	if !utils.ValidateOTP(in.OTP) {
+		return nil, badRequest(apperrors.CodeValidation, "otp must be exactly 6 digits")
+	}
+
+	hash, err := s.repo.GetEmailOTPHash(ctx, user.UserID, emailAddr)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "email otp expired or not found", Details: []string{}}
+		}
+		return nil, internalErr("failed to fetch email otp")
+	}
+	if svcErr := s.verifyEmailOTPHash(ctx, user.UserID, emailAddr, hash, in.OTP); svcErr != nil {
+		return nil, svcErr
+	}
+	if svcErr := s.markEmailVerified(ctx, user); svcErr != nil {
+		return nil, svcErr
+	}
+	_ = s.repo.DeleteEmailOTP(ctx, user.UserID, emailAddr)
+	return verifyEmailResponse(emailAddr, true, "Email verified successfully"), nil
+}
+
 func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError {
 	if strings.TrimSpace(in.SessionID) == "" || strings.TrimSpace(in.UserID) == "" {
 		return badRequest(apperrors.CodeValidation, "missing session or user id")
@@ -406,6 +468,81 @@ func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.Ser
 	return nil
 }
 
+func (s *Service) emailVerificationUser(ctx context.Context, userID string) (*models.UserRow, string, *models.ServiceError) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, "", badRequest(apperrors.CodeValidation, "user id is required")
+	}
+	user, err := s.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, "", &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeUserNotFound, Message: "user not found", Details: []string{}}
+		}
+		return nil, "", internalErr("failed to find user")
+	}
+	if user.AccountStatus == constants.AccountStatusSuspended {
+		return nil, "", &models.ServiceError{StatusCode: http.StatusForbidden, Code: apperrors.CodeAccountSuspended, Message: "account suspended", Details: []string{}}
+	}
+	emailAddr, svcErr := normalizeEmail(user.Email.String)
+	if !user.Email.Valid || svcErr != nil {
+		return nil, "", &models.ServiceError{StatusCode: http.StatusBadRequest, Code: apperrors.CodeEmailMissing, Message: "registered email is required", Details: []string{}}
+	}
+	return user, emailAddr, nil
+}
+
+func (s *Service) enforceEmailOTPRate(ctx context.Context, userID, emailAddr string) *models.ServiceError {
+	rateCount, err := s.repo.GetEmailOTPRateCount(ctx, userID, emailAddr)
+	if err != nil {
+		return internalErr("failed to check email otp rate")
+	}
+	if rateCount >= constants.AuthMaxOTPRatePerEmail {
+		return tooManyRequests(apperrors.CodeRateLimited, "too many email otp requests")
+	}
+	return nil
+}
+
+func (s *Service) verifyEmailOTPHash(ctx context.Context, userID, emailAddr, hash, otpCode string) *models.ServiceError {
+	if utils.CompareOTP(hash, otpCode) {
+		return nil
+	}
+	attempts, err := s.repo.IncrementEmailOTPAttempts(ctx, userID, emailAddr, constants.AuthOTPTTL)
+	if err != nil {
+		return internalErr("failed to update email otp attempts")
+	}
+	if attempts >= constants.AuthMaxOTPAttempts {
+		_ = s.repo.DeleteEmailOTP(ctx, userID, emailAddr)
+		return tooManyRequests(apperrors.CodeOTPMaxAttempts, "email otp max attempts reached")
+	}
+	return &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid email otp", Details: []string{}}
+}
+
+func (s *Service) markEmailVerified(ctx context.Context, user *models.UserRow) *models.ServiceError {
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.MarkUserEmailVerified(ctx, user.UserID); err != nil {
+			return err
+		}
+		return tx.InsertAuditLog(ctx, repository.AuditLogInput{
+			ActorID: user.UserID, ActorRole: user.Role,
+			Action: constants.AuditActionVerifyEmail, EntityType: constants.EntityTypeUsers, EntityID: user.UserID,
+		})
+	})
+	if err != nil {
+		return internalErr("failed to verify email")
+	}
+	return nil
+}
+
+func normalizeEmail(emailAddr string) (string, *models.ServiceError) {
+	emailAddr = strings.ToLower(strings.TrimSpace(emailAddr))
+	if emailAddr == "" {
+		return "", badRequest(apperrors.CodeEmailMissing, "email is required")
+	}
+	parsed, err := mail.ParseAddress(emailAddr)
+	if err != nil {
+		return "", badRequest(apperrors.CodeValidation, "email must be valid")
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Address)), nil
+}
+
 func createOTPBundle() (string, string, time.Time, *models.ServiceError) {
 	otpCode, err := utils.GenerateOTP()
 	if err != nil {
@@ -417,6 +554,27 @@ func createOTPBundle() (string, string, time.Time, *models.ServiceError) {
 	}
 	expiresAt := time.Now().UTC().Add(constants.AuthOTPTTL)
 	return otpCode, hash, expiresAt, nil
+}
+
+func emailOTPResponse(emailAddr string, expiresAt time.Time, message string, sent bool) *models.EmailOTPSendOutput {
+	expires := ""
+	if sent {
+		expires = expiresAt.UTC().Format(time.RFC3339)
+	}
+	return &models.EmailOTPSendOutput{
+		OTPSent:      sent,
+		OTPExpiresAt: expires,
+		MaskedEmail:  utils.MaskEmail(emailAddr),
+		Message:      message,
+	}
+}
+
+func verifyEmailResponse(emailAddr string, verified bool, message string) *models.VerifyEmailOutput {
+	return &models.VerifyEmailOutput{
+		EmailVerified: verified,
+		MaskedEmail:   utils.MaskEmail(emailAddr),
+		Message:       message,
+	}
 }
 
 func otpResponse(phone string, expiresAt time.Time) *models.OTPSendOutput {

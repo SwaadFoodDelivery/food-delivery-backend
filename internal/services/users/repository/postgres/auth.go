@@ -184,6 +184,13 @@ func (s *Store) MarkUserPhoneVerified(ctx context.Context, userID string) error 
 	return err
 }
 
+func (s *Store) MarkUserEmailVerified(ctx context.Context, userID string) error {
+	_, err := s.accessor.Execer().ExecContext(ctx, `
+		UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE user_id = $1::uuid
+	`, userID)
+	return err
+}
+
 func (s *Store) CountVerifiedOTPs(ctx context.Context, userID string) (int, error) {
 	var count int
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &count, `

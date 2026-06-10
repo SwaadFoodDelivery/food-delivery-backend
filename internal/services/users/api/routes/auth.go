@@ -38,6 +38,17 @@ func RegisterAuthRoutes(v1Public *gin.RouterGroup, v1Protected *gin.RouterGroup,
 	verifyOTP.POST("", h.VerifyOTP)
 
 	protectedAuth := v1Protected.Group("/auth")
+	sendEmailOTP := protectedAuth.Group("/send-email-otp",
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_email_otp", 5.0/3600.0, 3, 3600, middleware.UserIDKeyFunc),
+	)
+	sendEmailOTP.POST("", h.SendEmailOTP)
+
+	verifyEmail := protectedAuth.Group("/verify-email",
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_verify_email", 30.0/3600.0, 10, 3600, middleware.UserIDKeyFunc),
+		middleware.RequestValidator([]string{"otp"}, validations.ValidateVerifyEmailBody),
+	)
+	verifyEmail.POST("", h.VerifyEmail)
+
 	logout := protectedAuth.Group("/logout",
 		middleware.LeakyBucketRateLimit(deps.Redis, "auth_logout", 10.0/60.0, 5, 60, middleware.UserIDKeyFunc),
 	)

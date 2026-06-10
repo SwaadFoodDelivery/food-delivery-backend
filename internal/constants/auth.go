@@ -15,9 +15,10 @@ const (
 	AuthSessionTTL         = 24 * time.Hour
 	AuthRateWindow         = time.Hour
 	AuthMaxOTPRatePerPhone = 5
+	AuthMaxOTPRatePerEmail = 5
 	AuthMaxOTPAttempts     = 5
 	AuthOTPBlockedWindow   = 30 * time.Minute
-	AuthAccessTokenTTL     = 15 * time.Minute
+	AuthAccessTokenTTL     = 60 * time.Minute // change it back to 15 minutes in production after testing
 	AuthRefreshTokenTTL    = 30 * 24 * time.Hour
 )
 
@@ -28,9 +29,10 @@ const (
 )
 
 const (
-	AuditActionCreate = "create"
-	AuditActionLogin  = "login"
-	AuditActionLogout = "logout"
+	AuditActionCreate      = "create"
+	AuditActionLogin       = "login"
+	AuditActionLogout      = "logout"
+	AuditActionVerifyEmail = "verify_email"
 )
 
 const (

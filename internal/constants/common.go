@@ -44,12 +44,15 @@ const (
 )
 
 const (
-	RedisSessionKeyPattern         = "session:%s"
-	RedisCartKeyPattern            = "cart:%s"
-	RedisOTPKeyPattern             = "otp:%s"
-	RedisOTPRateLimitKeyPattern    = "otp:rate:%s"
-	RedisCaptchaRequiredKeyPattern = "captcha:required:%s"
-	RedisSessionActiveValue        = "true"
+	RedisSessionKeyPattern           = "session:%s"
+	RedisCartKeyPattern              = "cart:%s"
+	RedisOTPKeyPattern               = "otp:%s"
+	RedisOTPRateLimitKeyPattern      = "otp:rate:%s"
+	RedisEmailOTPKeyPattern          = "email_otp:%s:%s"
+	RedisEmailOTPAttemptsKeyPattern  = "email_otp:attempts:%s:%s"
+	RedisEmailOTPRateLimitKeyPattern = "email_otp:rate:%s:%s"
+	RedisCaptchaRequiredKeyPattern   = "captcha:required:%s"
+	RedisSessionActiveValue          = "true"
 )
 
 const (

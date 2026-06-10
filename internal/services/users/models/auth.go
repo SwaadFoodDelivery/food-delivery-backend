@@ -45,6 +45,15 @@ type VerifyOTPInput struct {
 	ClientType string
 }
 
+type SendEmailOTPInput struct {
+	UserID string
+}
+
+type VerifyEmailInput struct {
+	UserID string
+	OTP    string
+}
+
 type LogoutInput struct {
 	SessionID string
 	UserID    string
@@ -71,6 +80,19 @@ type VerifyOTPOutput struct {
 	TokenType    string       `json:"token_type"`
 	ExpiresIn    int          `json:"expires_in"`
 	User         VerifiedUser `json:"user"`
+}
+
+type EmailOTPSendOutput struct {
+	OTPSent      bool   `json:"otp_sent"`
+	OTPExpiresAt string `json:"otp_expires_at,omitempty"`
+	MaskedEmail  string `json:"masked_email"`
+	Message      string `json:"message"`
+}
+
+type VerifyEmailOutput struct {
+	EmailVerified bool   `json:"email_verified"`
+	MaskedEmail   string `json:"masked_email"`
+	Message       string `json:"message"`
 }
 
 type VerifiedUser struct {
@@ -135,4 +157,8 @@ type SendOTPRequest struct {
 type VerifyOTPRequest struct {
 	Phone string
 	OTP   string
+}
+
+type VerifyEmailRequest struct {
+	OTP string
 }

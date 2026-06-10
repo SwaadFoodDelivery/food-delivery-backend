@@ -40,6 +40,9 @@ type Config struct {
 		AuthToken  string
 		FromPhone  string
 	}
+	Email struct {
+		Provider string
+	}
 	S3 struct {
 		Provider          string
 		Bucket            string
@@ -102,6 +105,7 @@ func Load() (*Config, error) {
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")
 	cfg.OTP.AuthToken = viper.GetString("TWILIO_AUTH_TOKEN")
 	cfg.OTP.FromPhone = viper.GetString("TWILIO_FROM_PHONE")
+	cfg.Email.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("EMAIL_PROVIDER")))
 	cfg.S3.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("S3_PROVIDER")))
 	cfg.S3.Bucket = strings.TrimSpace(viper.GetString("S3_BUCKET"))
 	cfg.S3.Buckets = parseS3Buckets(viper.GetString("S3_BUCKETS"))
@@ -126,6 +130,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.OTP.Provider == "" {
 		cfg.OTP.Provider = constants.ProviderMock
+	}
+	if cfg.Email.Provider == "" {
+		cfg.Email.Provider = constants.ProviderMock
 	}
 	if cfg.S3.Provider == "" {
 		cfg.S3.Provider = constants.ProviderMock

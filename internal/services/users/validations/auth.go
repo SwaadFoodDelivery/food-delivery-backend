@@ -111,6 +111,20 @@ func ValidateVerifyOTPBody(input map[string]any, c *gin.Context) (any, []middlew
 	return req, details
 }
 
+func ValidateVerifyEmailBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
+	req := models.VerifyEmailRequest{}
+	details := make([]middleware.ValidationDetail, 0)
+
+	otpCode := strings.TrimSpace(getString(input, "otp"))
+	if !utils.ValidateOTP(otpCode) {
+		details = append(details, middleware.ValidationDetail{Field: "otp", Message: "must be exactly 6 digits"})
+	} else {
+		req.OTP = otpCode
+	}
+
+	return req, details
+}
+
 func getString(in map[string]any, key string) string {
 	v, ok := in[key]
 	if !ok {
