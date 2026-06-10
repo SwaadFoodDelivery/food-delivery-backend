@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	"food-delivery-backend/internal/constants"
+	apperrors "food-delivery-backend/internal/errors"
+
 	"github.com/gin-gonic/gin"
 )
-
-const validatedBodyContextKey = "validated_body"
 
 type ValidationDetail struct {
 	Field   string `json:"field"`
@@ -28,8 +29,8 @@ func RequestValidator(allowedFields []string, fn ValidationFunc) gin.HandlerFunc
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"status":     "error",
-				"error_code": "VALIDATION_ERROR",
+				"status":     constants.ResponseStatusError,
+				"error_code": apperrors.CodeValidation,
 				"message":    "invalid request body",
 				"details":    []ValidationDetail{{Field: "body", Message: "failed to read request body"}},
 			})
@@ -42,8 +43,8 @@ func RequestValidator(allowedFields []string, fn ValidationFunc) gin.HandlerFunc
 		parsed := map[string]any{}
 		if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"status":     "error",
-				"error_code": "VALIDATION_ERROR",
+				"status":     constants.ResponseStatusError,
+				"error_code": apperrors.CodeValidation,
 				"message":    "invalid JSON body",
 				"details":    []ValidationDetail{{Field: "body", Message: "malformed JSON"}},
 			})
@@ -60,22 +61,22 @@ func RequestValidator(allowedFields []string, fn ValidationFunc) gin.HandlerFunc
 		payload, details := fn(sanitized, c)
 		if len(details) > 0 {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"status":     "error",
-				"error_code": "VALIDATION_ERROR",
+				"status":     constants.ResponseStatusError,
+				"error_code": apperrors.CodeValidation,
 				"message":    "validation failed",
 				"details":    details,
 			})
 			return
 		}
 
-		c.Set(validatedBodyContextKey, payload)
+		c.Set(constants.DefaultValidatedBodyContext, payload)
 		c.Next()
 	}
 }
 
 func GetValidatedBody[T any](c *gin.Context) (T, bool) {
 	var zero T
-	raw, ok := c.Get(validatedBodyContextKey)
+	raw, ok := c.Get(constants.DefaultValidatedBodyContext)
 	if !ok {
 		return zero, false
 	}

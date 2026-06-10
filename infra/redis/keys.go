@@ -1,31 +1,39 @@
 package redis
 
-import "fmt"
+import (
+	"fmt"
 
-const (
-	SESSION_KEY        = "session:%s"
-	CART_KEY           = "cart:%s"
-	OTP_KEY            = "otp:%s"
-	OTP_RATE_LIMIT_KEY = "otp:rate:%s"
-	CAPTCHA_KEY        = "captcha:required:%s"
+	"food-delivery-backend/internal/constants"
 )
 
 func SessionKey(sessionID string) string {
-	return fmt.Sprintf(SESSION_KEY, sessionID)
+	return fmt.Sprintf(constants.RedisSessionKeyPattern, sessionID)
 }
 
 func CartKey(userID string) string {
-	return fmt.Sprintf(CART_KEY, userID)
+	return fmt.Sprintf(constants.RedisCartKeyPattern, userID)
 }
 
 func OTPKey(phone string) string {
-	return fmt.Sprintf(OTP_KEY, phone)
+	return fmt.Sprintf(constants.RedisOTPKeyPattern, phone)
 }
 
 func OTPRateKey(phone string) string {
-	return fmt.Sprintf(OTP_RATE_LIMIT_KEY, phone)
+	return fmt.Sprintf(constants.RedisOTPRateLimitKeyPattern, phone)
+}
+
+func EmailOTPKey(userID, email string) string {
+	return fmt.Sprintf(constants.RedisEmailOTPKeyPattern, userID, email)
+}
+
+func EmailOTPAttemptsKey(userID, email string) string {
+	return fmt.Sprintf(constants.RedisEmailOTPAttemptsKeyPattern, userID, email)
+}
+
+func EmailOTPRateKey(userID, email string) string {
+	return fmt.Sprintf(constants.RedisEmailOTPRateLimitKeyPattern, userID, email)
 }
 
 func CaptchaRequiredKey(ip string) string {
-	return fmt.Sprintf(CAPTCHA_KEY, ip)
+	return fmt.Sprintf(constants.RedisCaptchaRequiredKeyPattern, ip)
 }

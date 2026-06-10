@@ -1,6 +1,0 @@
-package kafka
-
-const (
-	ORDER_PLACED    = "ORDER_PLACED"
-	ORDER_CONFIRMED = "ORDER_CONFIRMED"
-)

@@ -1,9 +1,10 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"time"
+
+	"food-delivery-backend/internal/constants"
 
 	"github.com/gin-gonic/gin"
 	rds "github.com/redis/go-redis/v9"
@@ -16,12 +17,13 @@ func IdempotencyMiddleware(rc *rds.Client) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		ctx := c.Request.Context()
 		rkey := "idempotency:" + key
-		if v, _ := rc.Get(context.Background(), rkey).Result(); v != "" {
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{"status": "success", "data": v})
+		if v, _ := rc.Get(ctx, rkey).Result(); v != "" {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": v})
 			return
 		}
 		c.Next()
-		_ = rc.Set(context.Background(), rkey, "ok", 24*time.Hour).Err()
+		_ = rc.Set(ctx, rkey, "ok", 24*time.Hour).Err()
 	}
 }
