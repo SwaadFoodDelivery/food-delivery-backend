@@ -1,4 +1,4 @@
-COMPOSE_FILE ?= docker-compose.local.yml
+COMPOSE_FILE ?= docker-compose.yml
 POSTGRES_CONTAINER ?= food-delivery-postgres
 REDIS_CONTAINER ?= food-delivery-redis
 KAFKA_CONTAINER ?= food-delivery-kafka

@@ -1,0 +1,127 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Environment files (never include in Docker image)
+.env
+.env.local
+.env.*.local
+.env.production.local
+.env.development.local
+.env.test.local
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies (Go downloads them during build)
+vendor/
+node_modules/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+.project
+.classpath
+.c9/
+*.sublime-workspace
+
+# Build artifacts
+bin/
+dist/
+build/
+*.o
+*.a
+*.so
+.dylib
+.exe
+.out
+
+# Test coverage
+coverage/
+*.cover
+*.coverprofile
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+.directory
+.Trash-*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
+# Development tools & docs
+Makefile
+README.md
+docs/
+examples/
+postman/
+.postman/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+Jenkinsfile
+
+# Tools & Cache
+.cache/
+.tool-versions
+.nvmrc
+.node-version
+
+# Project specific
+*.md
+CONTRIBUTING.md
+LICENSE
+CHANGELOG.md
+.editorconfig
+
+# Any local test data
+test_data/
+fixtures/
+mock_data/
+
+# IDE cache directories
+.vscode/extensions/
+.vscode/settings.json
+.idea/workspace.xml
+.idea/tasks.xml
+*.iws
+
+# Misc
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
