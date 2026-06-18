@@ -1,6 +1,7 @@
 package app
 
 import (
+	natspub "food-delivery-backend/infra/nats"
 	"food-delivery-backend/internal/grpc/client"
 	"food-delivery-backend/internal/services/common/email"
 	"food-delivery-backend/internal/services/common/otp"
@@ -8,7 +9,6 @@ import (
 	"food-delivery-backend/pkg/config"
 
 	"github.com/jmoiron/sqlx"
-	natspub "food-delivery-backend/infra/nats"
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
