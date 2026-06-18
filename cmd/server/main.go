@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"food-delivery-backend/infra/kafka"
+	infraNATS "food-delivery-backend/infra/nats"
 	"food-delivery-backend/infra/postgres"
 	"food-delivery-backend/infra/redis"
 	"food-delivery-backend/internal/app"
@@ -23,9 +23,10 @@ import (
 	"food-delivery-backend/pkg/logger"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	rds "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
-	kafkago "github.com/segmentio/kafka-go"
 )
 
 func main() {
@@ -59,6 +60,7 @@ func main() {
 	}(); err != nil {
 		startupLog.Fatal().Err(err).Msg("migrations")
 	}
+
 	rdb, err := func() (*rds.Client, error) {
 		redisCtx, redisCancel := context.WithTimeout(startupCtx, constants.StartupRedisTimeout)
 		defer redisCancel()
@@ -67,14 +69,18 @@ func main() {
 	if err != nil {
 		startupLog.Fatal().Err(err).Msg("redis")
 	}
-	kw, err := func() (*kafkago.Writer, error) {
-		kafkaCtx, kafkaCancel := context.WithTimeout(startupCtx, constants.StartupKafkaTimeout)
-		defer kafkaCancel()
-		return kafka.NewProducer(kafkaCtx, cfg)
+
+	nc, js, err := func() (*nats.Conn, jetstream.JetStream, error) {
+		natsCtx, natsCancel := context.WithTimeout(startupCtx, constants.StartupNATSTimeout)
+		defer natsCancel()
+		return infraNATS.Connect(natsCtx, cfg)
 	}()
 	if err != nil {
-		startupLog.Fatal().Err(err).Msg("kafka")
+		startupLog.Fatal().Err(err).Msg("nats")
 	}
+
+	natsPublisher := infraNATS.NewPublisher(js)
+
 	oc := initOrderClient(startupCtx, startupLog, cfg)
 
 	var otpProvider otp.Provider
@@ -110,7 +116,8 @@ func main() {
 		Logger:          log,
 		DB:              db,
 		Redis:           rdb,
-		KafkaWriter:     kw,
+		NATSConn:        nc,
+		NATSPublisher:   natsPublisher,
 		OrderClient:     oc,
 		OTPProvider:     otpProvider,
 		EmailProvider:   emailProvider,
@@ -133,10 +140,11 @@ func main() {
 		startupLog.Fatal().Err(err).Str("addr", srv.Addr).Msg("http server start failed")
 	case <-quit:
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
-	_ = kw.Close()
+	nc.Drain() // flushes pending publishes then closes
 	_ = db.Close()
 	_ = rdb.Close()
 	if oc != nil {
