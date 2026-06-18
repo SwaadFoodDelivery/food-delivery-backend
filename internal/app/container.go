@@ -8,9 +8,10 @@ import (
 	"food-delivery-backend/pkg/config"
 
 	"github.com/jmoiron/sqlx"
+	natspub "food-delivery-backend/infra/nats"
+	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
-	"github.com/segmentio/kafka-go"
 )
 
 type Container struct {
@@ -18,7 +19,8 @@ type Container struct {
 	Logger          zerolog.Logger
 	DB              *sqlx.DB
 	Redis           *redis.Client
-	KafkaWriter     *kafka.Writer
+	NATSConn        *nats.Conn
+	NATSPublisher   *natspub.Publisher
 	OrderClient     *client.OrderServiceClient
 	OTPProvider     otp.Provider
 	EmailProvider   email.Provider

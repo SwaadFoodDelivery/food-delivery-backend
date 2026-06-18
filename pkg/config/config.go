@@ -24,12 +24,9 @@ type Config struct {
 		Addr, Password              string
 		DB, PoolSize, ReadTimeoutMS int
 	}
-	Kafka struct {
-		Brokers          []string
-		ClientID         string
-		RequiredAcks     int
-		BatchSize        int
-		OrderEventsTopic string
+	NATS struct {
+		URL      string
+		ClientID string
 	}
 	JWT struct {
 		Secret string
@@ -95,11 +92,8 @@ func Load() (*Config, error) {
 	cfg.Redis.DB = viper.GetInt("REDIS_DB")
 	cfg.Redis.PoolSize = viper.GetInt("REDIS_POOL_SIZE")
 	cfg.Redis.ReadTimeoutMS = viper.GetInt("REDIS_READ_TIMEOUT_MS")
-	cfg.Kafka.Brokers = strings.Split(viper.GetString("KAFKA_BROKERS"), ",")
-	cfg.Kafka.ClientID = viper.GetString("KAFKA_CLIENT_ID")
-	cfg.Kafka.RequiredAcks = viper.GetInt("KAFKA_REQUIRED_ACKS")
-	cfg.Kafka.BatchSize = viper.GetInt("KAFKA_BATCH_SIZE")
-	cfg.Kafka.OrderEventsTopic = viper.GetString("KAFKA_ORDER_EVENTS_TOPIC")
+	cfg.NATS.URL = viper.GetString("NATS_URL")
+	cfg.NATS.ClientID = viper.GetString("NATS_CLIENT_ID")
 	cfg.JWT.Secret = viper.GetString("JWT_SECRET")
 	cfg.OTP.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("OTP_PROVIDER")))
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")

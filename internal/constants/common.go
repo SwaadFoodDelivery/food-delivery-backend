@@ -60,16 +60,17 @@ const (
 	S3BucketPurposeOnboarding = "onboarding"
 )
 
+// NATS JetStream subjects — format: <domain>.<event>
 const (
-	KafkaTopicOrderPlaced    = "ORDER_PLACED"
-	KafkaTopicOrderConfirmed = "ORDER_CONFIRMED"
+	NATSSubjectOrderPlaced    = "order.placed"
+	NATSSubjectOrderConfirmed = "order.confirmed"
 )
 
 const (
 	StartupDBTimeout        = 45 * time.Second
 	StartupMigrationTimeout = 60 * time.Second
 	StartupRedisTimeout     = 20 * time.Second
-	StartupKafkaTimeout     = 20 * time.Second
+	StartupNATSTimeout      = 20 * time.Second
 	StartupGRPCTimeout      = 20 * time.Second
 )
 

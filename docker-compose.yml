@@ -33,42 +33,19 @@ services:
       timeout: 3s
       retries: 20
 
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.1
-    container_name: food-delivery-zookeeper
+  nats:
+    image: nats:2-alpine
+    container_name: food-delivery-nats
     restart: unless-stopped
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - nats_data:/data
     ports:
-      - "2181:2181"
+      - "4222:4222"
     healthcheck:
-      test: ["CMD-SHELL", "echo srvr | nc -w 2 localhost 2181 | grep -q Mode || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  kafka:
-    image: confluentinc/cp-kafka:7.6.1
-    container_name: food-delivery-kafka
-    restart: unless-stopped
-    depends_on:
-      zookeeper:
-        condition: service_healthy
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 10s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
       retries: 12
 
   minio:
@@ -156,7 +133,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      kafka:
+      nats:
         condition: service_healthy
       minio:
         condition: service_started
@@ -179,12 +156,9 @@ services:
       # Redis
       REDIS_ADDR: redis:6379
 
-      # Kafka
-      KAFKA_BROKERS: kafka:9092
-      KAFKA_CLIENT_ID: food-delivery-backend
-      KAFKA_REQUIRED_ACKS: "1"
-      KAFKA_BATCH_SIZE: "1"
-      KAFKA_ORDER_EVENTS_TOPIC: order-events
+      # NATS
+      NATS_URL: nats://nats:4222
+      NATS_CLIENT_ID: food-delivery-backend
 
       # Auth
       JWT_SECRET: dev-secret-change-me-in-prod
@@ -211,4 +185,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  nats_data:
   minio_data:
