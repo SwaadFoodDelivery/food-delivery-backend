@@ -9,6 +9,7 @@ import (
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/business"
 	"food-delivery-backend/internal/services/users/models"
+	"food-delivery-backend/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,7 +25,7 @@ func NewAuthHandler(svc business.AuthService) *AuthHandler {
 func (h *AuthHandler) CheckPhone(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.CheckPhoneRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
 		return
 	}
 
@@ -39,20 +40,16 @@ func (h *AuthHandler) CheckPhone(c *gin.Context) {
 	}
 
 	if out.Registered && out.AccountStatus == constants.AccountStatusSuspended {
-		c.JSON(http.StatusOK, gin.H{
-			"status":     constants.ResponseStatusError,
-			"error_code": apperrors.CodeAccountSuspended,
-			"data":       out,
-		})
+		response.ErrorWithData(c, http.StatusOK, apperrors.CodeAccountSuspended, "account suspended", out, []string{})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+	response.Success(c, http.StatusOK, out)
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.RegisterRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
 		return
 	}
 
@@ -69,13 +66,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+	response.Success(c, http.StatusOK, out)
 }
 
 func (h *AuthHandler) SendOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.SendOTPRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
 		return
 	}
 
@@ -88,13 +85,13 @@ func (h *AuthHandler) SendOTP(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+	response.Success(c, http.StatusOK, out)
 }
 
 func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.VerifyOTPRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
 		return
 	}
 
@@ -117,7 +114,7 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		out.RefreshToken = ""
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+	response.Success(c, http.StatusOK, out)
 }
 
 func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
@@ -129,13 +126,13 @@ func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+	response.Success(c, http.StatusOK, out)
 }
 
 func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.VerifyEmailRequest](c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
 		return
 	}
 
@@ -148,7 +145,7 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": out})
+	response.Success(c, http.StatusOK, out)
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
@@ -165,16 +162,11 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		writeServiceError(c, svcErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": constants.ResponseStatusSuccess, "data": gin.H{"message": "Logged out successfully"}})
+	response.Success(c, http.StatusOK, gin.H{"message": "Logged out successfully"})
 }
 
 func writeServiceError(c *gin.Context, err *models.ServiceError) {
-	c.JSON(err.StatusCode, gin.H{
-		"status":     constants.ResponseStatusError,
-		"error_code": err.Code,
-		"message":    err.Message,
-		"details":    err.Details,
-	})
+	response.Error(c, err.StatusCode, err.Code, err.Message, err.Details)
 }
 
 func toString(v any) string {

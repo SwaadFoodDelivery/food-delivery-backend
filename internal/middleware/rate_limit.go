@@ -12,6 +12,7 @@ import (
 
 	"food-delivery-backend/internal/constants"
 	apperrors "food-delivery-backend/internal/errors"
+	"food-delivery-backend/pkg/response"
 	"food-delivery-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -96,12 +97,7 @@ func LeakyBucketRateLimit(rc *rds.Client, scope string, rate float64, capacity i
 			retryAfterSeconds = 1
 		}
 		c.Header(constants.HeaderRetryAfter, strconv.Itoa(retryAfterSeconds))
-		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-			"status":     constants.ResponseStatusError,
-			"error_code": apperrors.CodeRateLimited,
-			"message":    "Too many requests. Please try again later.",
-			"details":    []string{},
-		})
+		response.AbortError(c, http.StatusTooManyRequests, apperrors.CodeRateLimited, "Too many requests. Please try again later.", []string{})
 	}
 }
 

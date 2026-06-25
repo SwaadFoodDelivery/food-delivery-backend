@@ -97,8 +97,10 @@ func main() {
 	switch cfg.Email.Provider {
 	case constants.ProviderMock:
 		emailProvider = email.NewMockProvider(log)
+	case constants.ProviderDev:
+		emailProvider = email.NewSendGridProvider(cfg.Email.SendGridKey, cfg.Email.SendGridEndpoint, cfg.Email.FromAddress, cfg.Email.FromName)
 	default:
-		startupLog.Fatal().Str("email_provider", cfg.Email.Provider).Msg("unsupported EMAIL_PROVIDER, use mock")
+		startupLog.Fatal().Str("email_provider", cfg.Email.Provider).Msg("unsupported EMAIL_PROVIDER, use mock or dev")
 	}
 
 	var storageProvider storage.Provider

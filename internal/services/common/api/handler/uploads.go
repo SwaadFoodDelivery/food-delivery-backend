@@ -10,6 +10,7 @@ import (
 	"food-delivery-backend/internal/constants"
 	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/common/storage"
+	"food-delivery-backend/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -36,20 +37,20 @@ type presignRequest struct {
 
 func (h *UploadsHandler) PresignURL(c *gin.Context) {
 	if h.storage == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeOnboardingStorageNotConfigured, "message": "storage provider is not configured", "details": []string{}})
+		response.Error(c, http.StatusInternalServerError, apperrors.CodeOnboardingStorageNotConfigured, "storage provider is not configured", []string{})
 		return
 	}
 
 	var req presignRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "invalid request body", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
 		return
 	}
 
 	userID, _ := c.Get(constants.AuthContextUserIDKey)
 	ownerPrefix := "users/" + strings.TrimSpace(toString(userID)) + "/"
 	if ownerPrefix == "users//" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeUnauthorized, "message": "user context missing", "details": []string{}})
+		response.Error(c, http.StatusUnauthorized, apperrors.CodeUnauthorized, "user context missing", []string{})
 		return
 	}
 
@@ -58,7 +59,7 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 		bucket = h.deps.Config.S3BucketFor(bucketPurpose(req))
 	}
 	if bucket == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "bucket is required", "details": []string{}})
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "bucket is required", []string{})
 		return
 	}
 
@@ -70,7 +71,7 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 	key := strings.TrimSpace(req.Key)
 	if key == "" {
 		if strings.TrimSpace(req.Entity) != "onboarding" || strings.TrimSpace(req.Onboarding) == "" || strings.TrimSpace(req.Document) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeValidation, "message": "either key or (entity=onboarding, onboarding_id, document_type) is required", "details": []string{}})
+			response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "either key or (entity=onboarding, onboarding_id, document_type) is required", []string{})
 			return
 		}
 		ext := strings.Trim(strings.TrimSpace(req.Extension), ".")
@@ -82,7 +83,7 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 	}
 
 	if !strings.HasPrefix(key, ownerPrefix) {
-		c.JSON(http.StatusForbidden, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeOnboardingInvalidObjectKey, "message": "object key must be owner scoped", "details": []string{}})
+		response.Error(c, http.StatusForbidden, apperrors.CodeOnboardingInvalidObjectKey, "object key must be owner scoped", []string{})
 		return
 	}
 
@@ -94,20 +95,17 @@ func (h *UploadsHandler) PresignURL(c *gin.Context) {
 		ExpiresIn:   time.Duration(h.deps.Config.S3.PresignTTLSeconds) * time.Second,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeOnboardingPresignFailed, "message": err.Error(), "details": []string{}})
+		response.Error(c, http.StatusInternalServerError, apperrors.CodeOnboardingPresignFailed, err.Error(), []string{})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": constants.ResponseStatusSuccess,
-		"data": gin.H{
-			"bucket":     bucket,
-			"key":        key,
-			"upload_url": out.URL,
-			"method":     out.Method,
-			"headers":    out.Headers,
-			"expires_at": out.ExpiresAt.Format(time.RFC3339),
-		},
+	response.Success(c, http.StatusOK, gin.H{
+		"bucket":     bucket,
+		"key":        key,
+		"upload_url": out.URL,
+		"method":     out.Method,
+		"headers":    out.Headers,
+		"expires_at": out.ExpiresAt.Format(time.RFC3339),
 	})
 }
 

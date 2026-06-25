@@ -83,4 +83,5 @@ const (
 	DefaultRateLimitPerMinute   = 60
 	DefaultRateLimitWindowSec   = 60
 	DefaultValidatedBodyContext = "validated_body"
+	DefaultSendGridEndpoint     = "https://api.sendgrid.com/v3/mail/send"
 )

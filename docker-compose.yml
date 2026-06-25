@@ -163,6 +163,10 @@ services:
       # Auth
       JWT_SECRET: dev-secret-change-me-in-prod
       EMAIL_PROVIDER: mock
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_ENDPOINT: ${SENDGRID_ENDPOINT:-https://api.sendgrid.com/v3/mail/send}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Food Delivery}
       S3_PROVIDER: dev
       S3_BUCKET: food-delivery-local
       S3_BUCKETS: default:food-delivery-local,onboarding:food-delivery-onboarding
