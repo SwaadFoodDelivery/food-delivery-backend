@@ -38,7 +38,11 @@ type Config struct {
 		FromPhone  string
 	}
 	Email struct {
-		Provider string
+		Provider         string
+		SendGridKey      string
+		SendGridEndpoint string
+		FromAddress      string
+		FromName         string
 	}
 	S3 struct {
 		Provider          string
@@ -100,6 +104,10 @@ func Load() (*Config, error) {
 	cfg.OTP.AuthToken = viper.GetString("TWILIO_AUTH_TOKEN")
 	cfg.OTP.FromPhone = viper.GetString("TWILIO_FROM_PHONE")
 	cfg.Email.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("EMAIL_PROVIDER")))
+	cfg.Email.SendGridKey = strings.TrimSpace(viper.GetString("SENDGRID_API_KEY"))
+	cfg.Email.SendGridEndpoint = strings.TrimSpace(viper.GetString("SENDGRID_ENDPOINT"))
+	cfg.Email.FromAddress = strings.TrimSpace(viper.GetString("EMAIL_FROM_ADDRESS"))
+	cfg.Email.FromName = strings.TrimSpace(viper.GetString("EMAIL_FROM_NAME"))
 	cfg.S3.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("S3_PROVIDER")))
 	cfg.S3.Bucket = strings.TrimSpace(viper.GetString("S3_BUCKET"))
 	cfg.S3.Buckets = parseS3Buckets(viper.GetString("S3_BUCKETS"))
@@ -127,6 +135,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.Email.Provider == "" {
 		cfg.Email.Provider = constants.ProviderMock
+	}
+	if cfg.Email.SendGridEndpoint == "" {
+		cfg.Email.SendGridEndpoint = constants.DefaultSendGridEndpoint
 	}
 	if cfg.S3.Provider == "" {
 		cfg.S3.Provider = constants.ProviderMock
