@@ -29,9 +29,12 @@ type Config struct {
 		ClientID string
 	}
 	JWT struct {
-		Secret string
+		Secret           string
+		GuestTokenSecret string
+		GuestTokenTTLMin int
 	}
-	OTP struct {
+	ClientAPIKey string
+	OTP          struct {
 		Provider   string
 		AccountSID string
 		AuthToken  string
@@ -99,6 +102,9 @@ func Load() (*Config, error) {
 	cfg.NATS.URL = viper.GetString("NATS_URL")
 	cfg.NATS.ClientID = viper.GetString("NATS_CLIENT_ID")
 	cfg.JWT.Secret = viper.GetString("JWT_SECRET")
+	cfg.JWT.GuestTokenSecret = viper.GetString("GUEST_TOKEN_SECRET")
+	cfg.JWT.GuestTokenTTLMin = viper.GetInt("GUEST_TOKEN_TTL_MIN")
+	cfg.ClientAPIKey = strings.TrimSpace(viper.GetString("CLIENT_API_KEY"))
 	cfg.OTP.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("OTP_PROVIDER")))
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")
 	cfg.OTP.AuthToken = viper.GetString("TWILIO_AUTH_TOKEN")
@@ -153,6 +159,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.RateLimit.WindowSec == 0 {
 		cfg.RateLimit.WindowSec = constants.DefaultRateLimitWindowSec
+	}
+	if cfg.JWT.GuestTokenTTLMin == 0 {
+		cfg.JWT.GuestTokenTTLMin = constants.DefaultGuestTokenTTLMin
 	}
 	return cfg, nil
 }
