@@ -18,12 +18,12 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, ok := c.Get(constants.AuthContextRoleKey)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeUnauthorized, "message": "missing auth claims", "details": []string{}})
+			abortError(c, http.StatusUnauthorized, apperrors.CodeUnauthorized, "missing auth claims")
 			return
 		}
 		rs, _ := role.(string)
 		if !allow[rs] {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"status": constants.ResponseStatusError, "error_code": apperrors.CodeForbidden, "message": "insufficient role", "details": []string{}})
+			abortError(c, http.StatusForbidden, apperrors.CodeForbidden, "insufficient role")
 			return
 		}
 		c.Next()

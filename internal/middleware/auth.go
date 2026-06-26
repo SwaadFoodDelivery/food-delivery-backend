@@ -9,6 +9,7 @@ import (
 	"food-delivery-backend/internal/constants"
 	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/pkg/config"
+	"food-delivery-backend/pkg/response"
 	apputils "food-delivery-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -66,10 +67,5 @@ func JWTAuthMiddleware(cfg *config.Config, rc *rds.Client) gin.HandlerFunc {
 }
 
 func abortError(c *gin.Context, statusCode int, code, message string) {
-	c.AbortWithStatusJSON(statusCode, gin.H{
-		"status":     constants.ResponseStatusError,
-		"error_code": code,
-		"message":    message,
-		"details":    []string{},
-	})
+	response.AbortError(c, statusCode, code, message, []string{})
 }

@@ -8,6 +8,7 @@ import (
 
 	"food-delivery-backend/internal/constants"
 	apperrors "food-delivery-backend/internal/errors"
+	"food-delivery-backend/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,12 +29,7 @@ func RequestValidator(allowedFields []string, fn ValidationFunc) gin.HandlerFunc
 	return func(c *gin.Context) {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"status":     constants.ResponseStatusError,
-				"error_code": apperrors.CodeValidation,
-				"message":    "invalid request body",
-				"details":    []ValidationDetail{{Field: "body", Message: "failed to read request body"}},
-			})
+			response.AbortError(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []ValidationDetail{{Field: "body", Message: "failed to read request body"}})
 			return
 		}
 		if len(bodyBytes) == 0 {
@@ -42,12 +38,7 @@ func RequestValidator(allowedFields []string, fn ValidationFunc) gin.HandlerFunc
 
 		parsed := map[string]any{}
 		if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"status":     constants.ResponseStatusError,
-				"error_code": apperrors.CodeValidation,
-				"message":    "invalid JSON body",
-				"details":    []ValidationDetail{{Field: "body", Message: "malformed JSON"}},
-			})
+			response.AbortError(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid JSON body", []ValidationDetail{{Field: "body", Message: "malformed JSON"}})
 			return
 		}
 
@@ -60,12 +51,7 @@ func RequestValidator(allowedFields []string, fn ValidationFunc) gin.HandlerFunc
 
 		payload, details := fn(sanitized, c)
 		if len(details) > 0 {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"status":     constants.ResponseStatusError,
-				"error_code": apperrors.CodeValidation,
-				"message":    "validation failed",
-				"details":    details,
-			})
+			response.AbortError(c, http.StatusBadRequest, apperrors.CodeValidation, "validation failed", details)
 			return
 		}
 
