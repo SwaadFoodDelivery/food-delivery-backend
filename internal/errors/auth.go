@@ -14,4 +14,6 @@ const (
 	CodeOTPInvalid             = "OTP_INVALID"
 	CodeOTPMaxAttempts         = "OTP_MAX_ATTEMPTS"
 	CodeOTPExpired             = "OTP_EXPIRED"
+	CodeGuestTokenMissing      = "GUEST_TOKEN_MISSING"
+	CodeGuestTokenInvalid      = "GUEST_TOKEN_INVALID"
 )

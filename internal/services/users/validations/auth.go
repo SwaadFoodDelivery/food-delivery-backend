@@ -33,7 +33,7 @@ func ValidateCheckPhoneBody(input map[string]any, _ *gin.Context) (any, []middle
 	return req, details
 }
 
-func ValidateRegisterBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
+func ValidateRegisterBody(input map[string]any, c *gin.Context) (any, []middleware.ValidationDetail) {
 	req := models.RegisterRequest{}
 	details := make([]middleware.ValidationDetail, 0)
 
@@ -67,11 +67,16 @@ func ValidateRegisterBody(input map[string]any, _ *gin.Context) (any, []middlewa
 		req.Role = role
 	}
 
+	deviceID := strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID))
+	if deviceID == "" || len(deviceID) > 255 {
+		details = append(details, middleware.ValidationDetail{Field: "device_id", Message: "header X-Device-ID is required and max length is 255"})
+	}
+
 	req.ReferralCode = strings.TrimSpace(getString(input, "referral_code"))
 	return req, details
 }
 
-func ValidateSendOTPBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
+func ValidateSendOTPBody(input map[string]any, c *gin.Context) (any, []middleware.ValidationDetail) {
 	req := models.SendOTPRequest{}
 	details := make([]middleware.ValidationDetail, 0)
 
@@ -80,6 +85,11 @@ func ValidateSendOTPBody(input map[string]any, _ *gin.Context) (any, []middlewar
 		details = append(details, middleware.ValidationDetail{Field: "phone", Message: "must be a valid phone number"})
 	} else {
 		req.Phone = utils.NormalizeIndianPhone(phone)
+	}
+
+	deviceID := strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID))
+	if deviceID == "" || len(deviceID) > 255 {
+		details = append(details, middleware.ValidationDetail{Field: "device_id", Message: "header X-Device-ID is required and max length is 255"})
 	}
 
 	return req, details

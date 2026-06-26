@@ -33,9 +33,16 @@ const (
 const (
 	HeaderAuthorization = "Authorization"
 	HeaderDeviceID      = "X-Device-ID"
+	HeaderGuestToken    = "X-Guest-Token"
+	HeaderAPIKey        = "X-API-Key"
 	HeaderClientType    = "X-Client-Type"
 	HeaderPlatform      = "X-Platform"
 	HeaderRetryAfter    = "Retry-After"
+)
+
+const (
+	GuestTokenSessionIDKey = "guest_session_id"
+	GuestTokenDeviceIDKey  = "guest_device_id"
 )
 
 const (
@@ -84,4 +91,5 @@ const (
 	DefaultRateLimitWindowSec   = 60
 	DefaultValidatedBodyContext = "validated_body"
 	DefaultSendGridEndpoint     = "https://api.sendgrid.com/v3/mail/send"
+	DefaultGuestTokenTTLMin     = 60
 )
