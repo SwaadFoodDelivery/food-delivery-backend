@@ -56,9 +56,9 @@ type Config struct {
 		Endpoint          string
 		AccessKeyID       string
 		SecretAccessKey   string
-		PresignTTLSeconds  int
-		MockBaseURL        string
-		PresignBaseURL     string
+		PresignTTLSeconds int
+		MockBaseURL       string
+		PresignBaseURL    string
 	}
 	GRPC struct {
 		OrderAddr     string
