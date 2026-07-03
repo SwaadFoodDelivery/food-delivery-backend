@@ -108,7 +108,7 @@ func main() {
 	case constants.ProviderMock:
 		storageProvider = storage.NewMockProvider(cfg.S3.MockBaseURL)
 	case constants.ProviderDev:
-		storageProvider = storage.NewDevProvider(cfg.S3.AccessKeyID, cfg.S3.SecretAccessKey, cfg.S3.Region, cfg.S3.Endpoint)
+		storageProvider = storage.NewDevProvider(cfg.S3.AccessKeyID, cfg.S3.SecretAccessKey, cfg.S3.Region, cfg.S3.Endpoint, cfg.S3.PresignBaseURL)
 	default:
 		startupLog.Fatal().Str("s3_provider", cfg.S3.Provider).Msg("unsupported S3_PROVIDER, use mock or dev")
 	}

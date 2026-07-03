@@ -58,6 +58,7 @@ type Config struct {
 		SecretAccessKey   string
 		PresignTTLSeconds int
 		MockBaseURL       string
+		PresignBaseURL    string
 	}
 	GRPC struct {
 		OrderAddr     string
@@ -126,6 +127,7 @@ func Load() (*Config, error) {
 	cfg.S3.SecretAccessKey = strings.TrimSpace(viper.GetString("S3_SECRET_ACCESS_KEY"))
 	cfg.S3.PresignTTLSeconds = viper.GetInt("S3_PRESIGN_TTL_SECONDS")
 	cfg.S3.MockBaseURL = strings.TrimSpace(viper.GetString("S3_MOCK_BASE_URL"))
+	cfg.S3.PresignBaseURL = strings.TrimSpace(viper.GetString("S3_PRESIGN_BASE_URL"))
 	cfg.GRPC.OrderAddr = viper.GetString("ORDER_GRPC_ADDR")
 	cfg.GRPC.OrderRequired = viper.GetBool("ORDER_GRPC_REQUIRED")
 	cfg.RateLimit.DefaultPerMin = viper.GetInt("RATE_LIMIT_DEFAULT_PER_MIN")

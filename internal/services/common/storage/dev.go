@@ -14,18 +14,20 @@ import (
 )
 
 type DevProvider struct {
-	accessKey string
-	secretKey string
-	region    string
-	endpoint  string
+	accessKey      string
+	secretKey      string
+	region         string
+	endpoint       string
+	presignBaseURL string
 }
 
-func NewDevProvider(accessKey, secretKey, region, endpoint string) *DevProvider {
+func NewDevProvider(accessKey, secretKey, region, endpoint, presignBaseURL string) *DevProvider {
 	return &DevProvider{
-		accessKey: strings.TrimSpace(accessKey),
-		secretKey: strings.TrimSpace(secretKey),
-		region:    strings.TrimSpace(region),
-		endpoint:  strings.TrimSpace(endpoint),
+		accessKey:      strings.TrimSpace(accessKey),
+		secretKey:      strings.TrimSpace(secretKey),
+		region:         strings.TrimSpace(region),
+		endpoint:       strings.TrimSpace(endpoint),
+		presignBaseURL: strings.TrimSpace(presignBaseURL),
 	}
 }
 
@@ -52,21 +54,35 @@ func (d *DevProvider) PresignPut(_ context.Context, in PresignPutInput) (*Presig
 	dateStamp := now.Format("20060102")
 	credentialScope := dateStamp + "/" + d.region + "/s3/aws4_request"
 
-	host, scheme, canonicalURI, err := d.hostAndURI(bucket, key)
+	signingEndpoint := d.endpoint
+	if d.presignBaseURL != "" {
+		signingEndpoint = d.presignBaseURL
+	}
+	host, scheme, canonicalURI, err := hostAndURI(signingEndpoint, d.region, bucket, key)
 	if err != nil {
 		return nil, err
 	}
+
+	signedHeaderNames := []string{"host"}
+	canonicalHeaders := "host:" + host + "\n"
+	outputHeaders := map[string]string{}
+	if ct := strings.TrimSpace(in.ContentType); ct != "" {
+		signedHeaderNames = append(signedHeaderNames, "content-type")
+		sort.Strings(signedHeaderNames)
+		// rebuild canonicalHeaders in sorted order
+		canonicalHeaders = "content-type:" + ct + "\n" + "host:" + host + "\n"
+		outputHeaders["Content-Type"] = ct
+	}
+	signedHeaders := strings.Join(signedHeaderNames, ";")
 
 	params := map[string]string{
 		"X-Amz-Algorithm":     "AWS4-HMAC-SHA256",
 		"X-Amz-Credential":    d.accessKey + "/" + credentialScope,
 		"X-Amz-Date":          amzDate,
 		"X-Amz-Expires":       fmt.Sprintf("%d", expires),
-		"X-Amz-SignedHeaders": "host",
+		"X-Amz-SignedHeaders": signedHeaders,
 	}
 	canonicalQuery := canonicalizeQuery(params)
-	canonicalHeaders := "host:" + host + "\n"
-	signedHeaders := "host"
 	payloadHash := "UNSIGNED-PAYLOAD"
 	canonicalRequest := strings.Join([]string{
 		"PUT",
@@ -95,24 +111,25 @@ func (d *DevProvider) PresignPut(_ context.Context, in PresignPutInput) (*Presig
 	signedValues.Set("X-Amz-Signature", signature)
 
 	presignedURL := fmt.Sprintf("%s://%s%s?%s", scheme, host, canonicalURI, signedValues.Encode())
+
 	return &PresignPutOutput{
 		URL:       presignedURL,
 		Method:    "PUT",
-		Headers:   map[string]string{"Content-Type": in.ContentType},
+		Headers:   outputHeaders,
 		ExpiresAt: now.Add(time.Duration(expires) * time.Second),
 	}, nil
 }
 
-func (d *DevProvider) hostAndURI(bucket, key string) (host, scheme, canonicalURI string, err error) {
+func hostAndURI(endpoint, region, bucket, key string) (host, scheme, canonicalURI string, err error) {
 	safeKey := escapeS3Key(key)
-	if d.endpoint == "" {
-		host = fmt.Sprintf("%s.s3.%s.amazonaws.com", bucket, d.region)
+	if endpoint == "" {
+		host = fmt.Sprintf("%s.s3.%s.amazonaws.com", bucket, region)
 		scheme = "https"
 		canonicalURI = "/" + safeKey
 		return
 	}
 
-	u, parseErr := url.Parse(d.endpoint)
+	u, parseErr := url.Parse(endpoint)
 	if parseErr != nil {
 		err = fmt.Errorf("invalid S3 endpoint: %w", parseErr)
 		return
