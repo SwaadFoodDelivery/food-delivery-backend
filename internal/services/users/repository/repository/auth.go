@@ -59,6 +59,21 @@ type Repository interface {
 	UpdateOnboardingStatus(ctx context.Context, in UpdateOnboardingStatusInput) error
 	MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, s3Key string) (bool, error)
 	SetUserOnboardingComplete(ctx context.Context, userID string, isComplete bool) error
+
+	GetUserProfileByID(ctx context.Context, userID string) (*models.UserProfileRow, error)
+	GetClientProfileByUserID(ctx context.Context, userID string) (*models.ClientProfileRow, error)
+	GetDriverProfileByUserID(ctx context.Context, userID string) (*models.DriverProfileRow, error)
+	UpdateUserCore(ctx context.Context, userID, name, email string, resetEmailVerified bool) error
+	UpsertClientProfile(ctx context.Context, userID, dateOfBirth, gender string) error
+	UpsertDriverProfile(ctx context.Context, userID string, isAvailable *bool, currentCity string) error
+	CountActiveAddresses(ctx context.Context, userID string) (int, error)
+	ListAddresses(ctx context.Context, userID string, offset, limit int) ([]models.AddressRow, error)
+	CountAddresses(ctx context.Context, userID string) (int, error)
+	UnsetDefaultAddress(ctx context.Context, userID string) error
+	CreateAddress(ctx context.Context, in CreateAddressInput) (*models.AddressRow, error)
+	FindAddressByIDAndUser(ctx context.Context, addressID, userID string) (*models.AddressRow, error)
+	UpdateAddress(ctx context.Context, in UpdateAddressInput) (*models.AddressRow, error)
+	SoftDeleteAddress(ctx context.Context, addressID, userID string) error
 }
 
 type repo struct {
