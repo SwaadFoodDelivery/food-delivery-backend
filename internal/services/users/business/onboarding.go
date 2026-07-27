@@ -81,6 +81,16 @@ func (s *Service) SubmitOnboarding(ctx context.Context, in models.SubmitOnboardi
 		}); txErr != nil {
 			return txErr
 		}
+		// Submission is the last user-facing step today (there is no admin
+		// approve/reject endpoint yet), so this is where the account leaves
+		// "first-time" status. RequireOnboardingAccess reads this same flag;
+		// without setting it here a user could re-init and re-submit forever.
+		// NOTE: a future reject workflow must set this back to false (see
+		// ResubmitOnboarding below), or a rejected user would be locked out of
+		// resubmitting by this same gate.
+		if txErr := tx.SetUserOnboardingComplete(ctx, userID, true); txErr != nil {
+			return txErr
+		}
 		return tx.InsertAuditLog(ctx, repository.AuditLogInput{
 			ActorID:    userID,
 			ActorRole:  onboarding.Role,
@@ -122,6 +132,12 @@ func (s *Service) ResubmitOnboarding(ctx context.Context, in models.ResubmitOnbo
 			Status:          constants.OnboardingStatusDraft,
 			RejectionReason: nil,
 		}); txErr != nil {
+			return txErr
+		}
+		// Mirrors the flag flip in SubmitOnboarding: a rejected onboarding needs
+		// the user back in the flow, so RequireOnboardingAccess must let them
+		// through again.
+		if txErr := tx.SetUserOnboardingComplete(ctx, userID, false); txErr != nil {
 			return txErr
 		}
 		return tx.InsertAuditLog(ctx, repository.AuditLogInput{

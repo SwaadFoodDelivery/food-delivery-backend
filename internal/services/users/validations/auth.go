@@ -51,18 +51,24 @@ func ValidateRegisterBody(input map[string]any, c *gin.Context) (any, []middlewa
 		req.Name = name
 	}
 
+	// Email is mandatory: registration requires a prior verification of it.
 	email := strings.TrimSpace(getString(input, "email"))
-	if email != "" {
-		if _, err := mail.ParseAddress(email); err != nil {
-			details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email"})
-		} else {
-			req.Email = email
-		}
+	if email == "" {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "is required and must be verified before registering"})
+	} else if _, err := mail.ParseAddress(email); err != nil {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email"})
+	} else {
+		req.Email = email
 	}
 
+	// restaurant_manager is provisioned by that restaurant's owner, not through
+	// public sign-up — validRole() stays permissive for login/onboarding, where
+	// an already-provisioned manager account must keep working.
 	role := strings.TrimSpace(getString(input, "role"))
-	if !validRole(role) {
-		details = append(details, middleware.ValidationDetail{Field: "role", Message: "must be one of client, restaurant_owner, restaurant_manager, driver"})
+	if role == constants.RoleRestaurantManager {
+		details = append(details, middleware.ValidationDetail{Field: "role", Message: "restaurant_manager accounts are created by the restaurant owner, not through sign-up"})
+	} else if !validRole(role) {
+		details = append(details, middleware.ValidationDetail{Field: "role", Message: "must be one of client, restaurant_owner, driver"})
 	} else {
 		req.Role = role
 	}
@@ -87,6 +93,13 @@ func ValidateSendOTPBody(input map[string]any, c *gin.Context) (any, []middlewar
 		req.Phone = utils.NormalizeIndianPhone(phone)
 	}
 
+	role := strings.TrimSpace(getString(input, "role"))
+	if !validRole(role) {
+		details = append(details, middleware.ValidationDetail{Field: "role", Message: "must be one of client, restaurant_owner, restaurant_manager, driver"})
+	} else {
+		req.Role = role
+	}
+
 	deviceID := strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID))
 	if deviceID == "" || len(deviceID) > 255 {
 		details = append(details, middleware.ValidationDetail{Field: "device_id", Message: "header X-Device-ID is required and max length is 255"})
@@ -106,6 +119,13 @@ func ValidateVerifyOTPBody(input map[string]any, c *gin.Context) (any, []middlew
 		req.Phone = utils.NormalizeIndianPhone(phone)
 	}
 
+	role := strings.TrimSpace(getString(input, "role"))
+	if !validRole(role) {
+		details = append(details, middleware.ValidationDetail{Field: "role", Message: "must be one of client, restaurant_owner, restaurant_manager, driver"})
+	} else {
+		req.Role = role
+	}
+
 	otpCode := strings.TrimSpace(getString(input, "otp"))
 	if !utils.ValidateOTP(otpCode) {
 		details = append(details, middleware.ValidationDetail{Field: "otp", Message: "must be exactly 6 digits"})
@@ -121,9 +141,34 @@ func ValidateVerifyOTPBody(input map[string]any, c *gin.Context) (any, []middlew
 	return req, details
 }
 
+func ValidateSendEmailOTPBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
+	req := models.SendEmailOTPRequest{}
+	details := make([]middleware.ValidationDetail, 0)
+
+	email := strings.TrimSpace(getString(input, "email"))
+	if email == "" {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "is required"})
+	} else if _, err := mail.ParseAddress(email); err != nil {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email"})
+	} else {
+		req.Email = email
+	}
+
+	return req, details
+}
+
 func ValidateVerifyEmailBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
 	req := models.VerifyEmailRequest{}
 	details := make([]middleware.ValidationDetail, 0)
+
+	email := strings.TrimSpace(getString(input, "email"))
+	if email == "" {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "is required"})
+	} else if _, err := mail.ParseAddress(email); err != nil {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email"})
+	} else {
+		req.Email = email
+	}
 
 	otpCode := strings.TrimSpace(getString(input, "otp"))
 	if !utils.ValidateOTP(otpCode) {

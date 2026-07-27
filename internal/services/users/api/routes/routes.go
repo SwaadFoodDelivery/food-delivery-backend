@@ -14,4 +14,5 @@ func RegisterRoutes(v1Public *gin.RouterGroup, v1Protected *gin.RouterGroup, dep
 
 	RegisterAuthRoutes(v1Public, v1Protected, deps, svc)
 	RegisterOnboardingRoutes(v1Public, v1Protected, deps, repo, svc)
+	RegisterProfileRoutes(v1Public, v1Protected, deps, svc)
 }

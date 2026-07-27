@@ -89,6 +89,13 @@ func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 }
 
 func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError) {
+	// Defense in depth: ValidateRegisterBody already rejects this at the HTTP
+	// layer. Repeated here because a manager account being self-created would
+	// be a real privilege issue, not just a bad request, if that gate were ever
+	// bypassed or a future caller skipped the validator.
+	if strings.TrimSpace(in.Role) == constants.RoleRestaurantManager {
+		return nil, &models.ServiceError{StatusCode: http.StatusForbidden, Code: apperrors.CodeRoleNotSelfRegisterable, Message: "restaurant_manager accounts are created by the restaurant owner, not through sign-up", Details: []string{}}
+	}
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
 		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())
@@ -96,9 +103,31 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 	if strings.TrimSpace(in.Name) == "" || len(strings.TrimSpace(in.Name)) > 100 {
 		return nil, badRequest(apperrors.CodeValidation, "name must be non-empty and at most 100 chars")
 	}
-	email := strings.TrimSpace(in.Email)
+	email, svcErr := normalizeEmail(in.Email)
+	if svcErr != nil {
+		return nil, svcErr
+	}
 
-	rateCount, err := s.repo.GetOTPRateCount(ctx, phone)
+	// An account can only be created for an email this guest session has already
+	// verified. Without the marker, registration is refused outright.
+	sid := strings.TrimSpace(in.GuestSessionID)
+	if sid == "" {
+		return nil, badRequest(apperrors.CodeGuestTokenInvalid, "guest session is required")
+	}
+	verified, err := s.repo.IsEmailVerified(ctx, guestScope(sid), email)
+	if err != nil {
+		return nil, internalErr("failed to check email verification")
+	}
+	if !verified {
+		return nil, &models.ServiceError{
+			StatusCode: http.StatusForbidden,
+			Code:       apperrors.CodeEmailNotVerified,
+			Message:    "verify your email via /auth/send-email-otp and /auth/verify-email before registering",
+			Details:    []string{},
+		}
+	}
+
+	rateCount, err := s.repo.GetOTPRateCount(ctx, phone, in.Role)
 	if err != nil {
 		return nil, internalErr("failed to check otp rate")
 	}
@@ -113,14 +142,12 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 	if exists {
 		return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodePhoneAlreadyRegistered, Message: "phone already registered", Details: []string{}}
 	}
-	if email != "" {
-		exists, err := s.repo.UserExistsByEmailRole(ctx, email, in.Role)
-		if err != nil {
-			return nil, internalErr("failed to check existing email")
-		}
-		if exists {
-			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeEmailAlreadyRegistered, Message: "email already registered for this role", Details: []string{}}
-		}
+	emailExists, err := s.repo.UserExistsByEmailRole(ctx, email, in.Role)
+	if err != nil {
+		return nil, internalErr("failed to check existing email")
+	}
+	if emailExists {
+		return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeEmailAlreadyRegistered, Message: "email already registered for this role", Details: []string{}}
 	}
 
 	otpCode, hash, expiresAt, svcErr := createOTPBundle()
@@ -130,11 +157,12 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		userID, err := tx.CreateUser(ctx, repository.CreateUserInput{
-			Phone:        phone,
-			Name:         strings.TrimSpace(in.Name),
-			Email:        email,
-			Role:         in.Role,
-			ReferralCode: strings.TrimSpace(in.ReferralCode),
+			Phone:         phone,
+			Name:          strings.TrimSpace(in.Name),
+			Email:         email,
+			Role:          in.Role,
+			ReferralCode:  strings.TrimSpace(in.ReferralCode),
+			EmailVerified: true,
 		})
 		if err != nil {
 			return err
@@ -158,14 +186,27 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 		}); err != nil {
 			return err
 		}
-		if err := tx.SetOTPHashAndRate(ctx, phone, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
+		if err := tx.SetOTPHashAndRate(ctx, phone, in.Role, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
 			return err
 		}
 		return nil
 	})
 	if err != nil {
+		// The pre-checks above are not atomic with the insert, so a concurrent
+		// registration can still lose the race against the unique indexes.
+		if repository.IsConflict(err) {
+			return nil, &models.ServiceError{
+				StatusCode: http.StatusConflict,
+				Code:       apperrors.CodePhoneAlreadyRegistered,
+				Message:    "phone or email already registered for this role",
+				Details:    []string{},
+			}
+		}
 		return nil, internalErr("failed to register user")
 	}
+
+	// One verification, one account.
+	_ = s.repo.DeleteEmailVerified(ctx, guestScope(sid), email)
 
 	if err := s.otpProvider.Send(ctx, phone, otpCode); err != nil {
 		return nil, internalErr("failed to dispatch otp")
@@ -180,7 +221,14 @@ func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())
 	}
 
-	user, err := s.repo.FindUserByPhone(ctx, phone)
+	role := strings.TrimSpace(in.Role)
+	if role == "" {
+		return nil, badRequest(apperrors.CodeValidation, "role is required")
+	}
+
+	// Resolved by phone AND role: one number may own a separate account per role,
+	// and each is a distinct entity with its own OTP, budget, and session.
+	user, err := s.repo.FindUserByPhoneAndRole(ctx, phone, role)
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeUserNotFound, Message: "user not found", Details: []string{}}
@@ -191,7 +239,7 @@ func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		return nil, &models.ServiceError{StatusCode: http.StatusForbidden, Code: apperrors.CodeAccountSuspended, Message: "account suspended", Details: []string{}}
 	}
 
-	rateCount, err := s.repo.GetOTPRateCount(ctx, phone)
+	rateCount, err := s.repo.GetOTPRateCount(ctx, phone, role)
 	if err != nil {
 		return nil, internalErr("failed to check otp rate")
 	}
@@ -199,7 +247,7 @@ func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 		return nil, tooManyRequests(apperrors.CodeRateLimited, "too many otp requests")
 	}
 
-	otpRec, err := s.repo.FindLatestActiveOTPByPhone(ctx, phone)
+	otpRec, err := s.repo.FindLatestActiveOTPByUser(ctx, user.UserID)
 	if err == nil {
 		if otpRec.ResendCount >= constants.AuthMaxOTPRatePerPhone {
 			return nil, tooManyRequests(apperrors.CodeRateLimited, "otp resend limit exceeded")
@@ -225,7 +273,7 @@ func (s *Service) SendOTP(ctx context.Context, in models.SendOTPInput) (*models.
 	}); err != nil {
 		return nil, internalErr("failed to create otp request")
 	}
-	if err := s.repo.SetOTPHashAndRate(ctx, phone, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
+	if err := s.repo.SetOTPHashAndRate(ctx, phone, role, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
 		return nil, internalErr("failed to store otp cache")
 	}
 
@@ -247,8 +295,23 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 	if !utils.ValidateOTP(in.OTP) {
 		return nil, badRequest(apperrors.CodeValidation, "otp must be exactly 6 digits")
 	}
+	role := strings.TrimSpace(in.Role)
+	if role == "" {
+		return nil, badRequest(apperrors.CodeValidation, "role is required")
+	}
 
-	otpRec, err := s.repo.FindLatestUnverifiedOTPByPhoneDevice(ctx, phone, in.DeviceID)
+	// Resolve the account first, then look the OTP up against that account. A
+	// phone-scoped lookup would let an OTP issued for one role be redeemed into
+	// another account on the same number.
+	account, err := s.repo.FindUserByPhoneAndRole(ctx, phone, role)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid otp", Details: []string{}}
+		}
+		return nil, internalErr("failed to find user")
+	}
+
+	otpRec, err := s.repo.FindLatestUnverifiedOTPByUserDevice(ctx, account.UserID, in.DeviceID)
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid otp", Details: []string{}}
@@ -269,10 +332,26 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 
 	if otpRec.ExpiresAt.Before(now) {
 		_ = s.repo.IncrementOTPAttempts(ctx, otpRec.OTPID)
+		// otpRec.Attempts is the count from before this increment (Postgres
+		// UPDATE ... SET attempts = attempts + 1 doesn't hand back the new
+		// value), so otpRec.Attempts+1 is what it is now. Blocking on that,
+		// rather than waiting for the NEXT call to see the stale count via the
+		// otpRec.Attempts >= AuthMaxOTPAttempts check above, matches the
+		// email-OTP path (which checks its own post-increment count) and the
+		// documented "5 wrong tries burns the code" contract — otherwise a 6th
+		// attempt was silently allowed before the block took effect.
+		if otpRec.Attempts+1 >= constants.AuthMaxOTPAttempts {
+			_ = s.repo.SetOTPBlockedUntil(ctx, otpRec.OTPID, now.Add(constants.AuthOTPBlockedWindow))
+			return nil, tooManyRequests(apperrors.CodeOTPMaxAttempts, "otp max attempts reached")
+		}
 		return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "otp expired", Details: []string{}}
 	}
 	if !utils.CompareOTP(otpRec.OTPHash, in.OTP) {
 		_ = s.repo.IncrementOTPAttempts(ctx, otpRec.OTPID)
+		if otpRec.Attempts+1 >= constants.AuthMaxOTPAttempts {
+			_ = s.repo.SetOTPBlockedUntil(ctx, otpRec.OTPID, now.Add(constants.AuthOTPBlockedWindow))
+			return nil, tooManyRequests(apperrors.CodeOTPMaxAttempts, "otp max attempts reached")
+		}
 		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid otp", Details: []string{}}
 	}
 	if otpRec.UserID == nil || *otpRec.UserID == "" {
@@ -317,7 +396,7 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 		}); err != nil {
 			return err
 		}
-		if err := tx.DeleteOTP(ctx, phone); err != nil {
+		if err := tx.DeleteOTP(ctx, phone, role); err != nil {
 			return err
 		}
 		if err := tx.SetSession(ctx, repository.SetSessionInput{
@@ -380,18 +459,23 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 	return out, nil
 }
 
+// SendEmailOTP issues an email OTP before any account exists. It is scoped to the
+// caller's guest session, so the resulting verification cannot be replayed from a
+// different device or session.
 func (s *Service) SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput) (*models.EmailOTPSendOutput, *models.ServiceError) {
-	user, emailAddr, svcErr := s.emailVerificationUser(ctx, in.UserID)
+	sid := strings.TrimSpace(in.GuestSessionID)
+	if sid == "" {
+		return nil, badRequest(apperrors.CodeGuestTokenInvalid, "guest session is required")
+	}
+	emailAddr, svcErr := normalizeEmail(in.Email)
 	if svcErr != nil {
 		return nil, svcErr
-	}
-	if user.EmailVerified {
-		return emailOTPResponse(emailAddr, time.Now().UTC(), "Email is already verified", false), nil
 	}
 	if s.emailProvider == nil {
 		return nil, internalErr("email provider is not configured")
 	}
-	if svcErr := s.enforceEmailOTPRate(ctx, user.UserID, emailAddr); svcErr != nil {
+	scope := guestScope(sid)
+	if svcErr := s.enforceEmailOTPRate(ctx, scope, emailAddr); svcErr != nil {
 		return nil, svcErr
 	}
 
@@ -399,42 +483,46 @@ func (s *Service) SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput)
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	if err := s.repo.SetEmailOTPHashAndRate(ctx, user.UserID, emailAddr, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
+	if err := s.repo.SetEmailOTPHashAndRate(ctx, scope, emailAddr, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
 		return nil, internalErr("failed to store email otp")
 	}
 	if err := s.emailProvider.SendVerificationOTP(ctx, emailAddr, otpCode); err != nil {
 		return nil, internalErr("failed to dispatch email otp")
 	}
-	return emailOTPResponse(emailAddr, expiresAt, "OTP sent to registered email and valid for 10 minutes", true), nil
+	return emailOTPResponse(emailAddr, expiresAt, "OTP sent to email and valid for 10 minutes", true), nil
 }
 
+// VerifyEmail confirms the OTP and records the verification against the guest
+// session. Register then requires that marker before it will create an account.
 func (s *Service) VerifyEmail(ctx context.Context, in models.VerifyEmailInput) (*models.VerifyEmailOutput, *models.ServiceError) {
-	user, emailAddr, svcErr := s.emailVerificationUser(ctx, in.UserID)
+	sid := strings.TrimSpace(in.GuestSessionID)
+	if sid == "" {
+		return nil, badRequest(apperrors.CodeGuestTokenInvalid, "guest session is required")
+	}
+	emailAddr, svcErr := normalizeEmail(in.Email)
 	if svcErr != nil {
 		return nil, svcErr
-	}
-	if user.EmailVerified {
-		return verifyEmailResponse(emailAddr, true, "Email is already verified"), nil
 	}
 	if !utils.ValidateOTP(in.OTP) {
 		return nil, badRequest(apperrors.CodeValidation, "otp must be exactly 6 digits")
 	}
 
-	hash, err := s.repo.GetEmailOTPHash(ctx, user.UserID, emailAddr)
+	scope := guestScope(sid)
+	hash, err := s.repo.GetEmailOTPHash(ctx, scope, emailAddr)
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "email otp expired or not found", Details: []string{}}
 		}
 		return nil, internalErr("failed to fetch email otp")
 	}
-	if svcErr := s.verifyEmailOTPHash(ctx, user.UserID, emailAddr, hash, in.OTP); svcErr != nil {
+	if svcErr := s.verifyEmailOTPHash(ctx, scope, emailAddr, hash, in.OTP); svcErr != nil {
 		return nil, svcErr
 	}
-	if svcErr := s.markEmailVerified(ctx, user); svcErr != nil {
-		return nil, svcErr
+	if err := s.repo.SetEmailVerified(ctx, scope, emailAddr, constants.AuthEmailVerifiedTTL); err != nil {
+		return nil, internalErr("failed to record email verification")
 	}
-	_ = s.repo.DeleteEmailOTP(ctx, user.UserID, emailAddr)
-	return verifyEmailResponse(emailAddr, true, "Email verified successfully"), nil
+	_ = s.repo.DeleteEmailOTP(ctx, scope, emailAddr)
+	return verifyEmailResponse(emailAddr, true, "Email verified. Continue to registration within 30 minutes."), nil
 }
 
 func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError {
@@ -468,27 +556,6 @@ func (s *Service) Logout(ctx context.Context, in models.LogoutInput) *models.Ser
 	return nil
 }
 
-func (s *Service) emailVerificationUser(ctx context.Context, userID string) (*models.UserRow, string, *models.ServiceError) {
-	if strings.TrimSpace(userID) == "" {
-		return nil, "", badRequest(apperrors.CodeValidation, "user id is required")
-	}
-	user, err := s.repo.FindUserByID(ctx, userID)
-	if err != nil {
-		if repository.IsNotFound(err) {
-			return nil, "", &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeUserNotFound, Message: "user not found", Details: []string{}}
-		}
-		return nil, "", internalErr("failed to find user")
-	}
-	if user.AccountStatus == constants.AccountStatusSuspended {
-		return nil, "", &models.ServiceError{StatusCode: http.StatusForbidden, Code: apperrors.CodeAccountSuspended, Message: "account suspended", Details: []string{}}
-	}
-	emailAddr, svcErr := normalizeEmail(user.Email.String)
-	if !user.Email.Valid || svcErr != nil {
-		return nil, "", &models.ServiceError{StatusCode: http.StatusBadRequest, Code: apperrors.CodeEmailMissing, Message: "registered email is required", Details: []string{}}
-	}
-	return user, emailAddr, nil
-}
-
 func (s *Service) enforceEmailOTPRate(ctx context.Context, userID, emailAddr string) *models.ServiceError {
 	rateCount, err := s.repo.GetEmailOTPRateCount(ctx, userID, emailAddr)
 	if err != nil {
@@ -515,20 +582,16 @@ func (s *Service) verifyEmailOTPHash(ctx context.Context, userID, emailAddr, has
 	return &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid email otp", Details: []string{}}
 }
 
-func (s *Service) markEmailVerified(ctx context.Context, user *models.UserRow) *models.ServiceError {
-	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.MarkUserEmailVerified(ctx, user.UserID); err != nil {
-			return err
-		}
-		return tx.InsertAuditLog(ctx, repository.AuditLogInput{
-			ActorID: user.UserID, ActorRole: user.Role,
-			Action: constants.AuditActionVerifyEmail, EntityType: constants.EntityTypeUsers, EntityID: user.UserID,
-		})
-	})
-	if err != nil {
-		return internalErr("failed to verify email")
-	}
-	return nil
+// guestScope and userScope namespace the email OTP keyspace by who the OTP
+// belongs to. Pre-registration OTPs belong to a guest session; email-change OTPs
+// belong to a logged-in user. Keeping them apart means an OTP issued in one
+// context can never be redeemed in the other.
+func guestScope(guestSessionID string) string {
+	return constants.RedisScopeGuest + ":" + guestSessionID
+}
+
+func userScope(userID string) string {
+	return constants.RedisScopeUser + ":" + userID
 }
 
 func normalizeEmail(emailAddr string) (string, *models.ServiceError) {

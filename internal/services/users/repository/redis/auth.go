@@ -29,8 +29,8 @@ func NewStore(client *rds.Client) *Store {
 	return &Store{redis: client}
 }
 
-func (s *Store) GetOTPRateCount(ctx context.Context, phone string) (int, error) {
-	val, err := s.redis.Get(ctx, appredis.OTPRateKey(phone)).Result()
+func (s *Store) GetOTPRateCount(ctx context.Context, phone, role string) (int, error) {
+	val, err := s.redis.Get(ctx, appredis.OTPRateKey(phone, role)).Result()
 	if err != nil {
 		if errors.Is(err, rds.Nil) {
 			return 0, nil
@@ -62,26 +62,26 @@ func (s *Store) IncrementNotFoundProbe(ctx context.Context, ip string, threshold
 	return false, nil
 }
 
-func (s *Store) SetOTPHashAndRate(ctx context.Context, phone, hash string, otpTTL, rateTTL time.Duration) error {
-	if err := s.redis.Set(ctx, appredis.OTPKey(phone), hash, otpTTL).Err(); err != nil {
+func (s *Store) SetOTPHashAndRate(ctx context.Context, phone, role, hash string, otpTTL, rateTTL time.Duration) error {
+	if err := s.redis.Set(ctx, appredis.OTPKey(phone, role), hash, otpTTL).Err(); err != nil {
 		return err
 	}
-	cnt, err := s.redis.Incr(ctx, appredis.OTPRateKey(phone)).Result()
+	cnt, err := s.redis.Incr(ctx, appredis.OTPRateKey(phone, role)).Result()
 	if err != nil {
 		return err
 	}
 	if cnt == 1 {
-		_ = s.redis.Expire(ctx, appredis.OTPRateKey(phone), rateTTL).Err()
+		_ = s.redis.Expire(ctx, appredis.OTPRateKey(phone, role), rateTTL).Err()
 	}
 	return nil
 }
 
-func (s *Store) ExpireOTP(ctx context.Context, phone string, ttl time.Duration) error {
-	return s.redis.Expire(ctx, appredis.OTPKey(phone), ttl).Err()
+func (s *Store) ExpireOTP(ctx context.Context, phone, role string, ttl time.Duration) error {
+	return s.redis.Expire(ctx, appredis.OTPKey(phone, role), ttl).Err()
 }
 
-func (s *Store) DeleteOTP(ctx context.Context, phone string) error {
-	return s.redis.Del(ctx, appredis.OTPKey(phone)).Err()
+func (s *Store) DeleteOTP(ctx context.Context, phone, role string) error {
+	return s.redis.Del(ctx, appredis.OTPKey(phone, role)).Err()
 }
 
 func (s *Store) GetEmailOTPRateCount(ctx context.Context, userID, email string) (int, error) {
@@ -141,6 +141,25 @@ func (s *Store) IncrementEmailOTPAttempts(ctx context.Context, userID, email str
 
 func (s *Store) DeleteEmailOTP(ctx context.Context, userID, email string) error {
 	return s.redis.Del(ctx, appredis.EmailOTPKey(userID, email), appredis.EmailOTPAttemptsKey(userID, email)).Err()
+}
+
+func (s *Store) SetEmailVerified(ctx context.Context, guestSessionID, email string, ttl time.Duration) error {
+	return s.redis.Set(ctx, appredis.EmailVerifiedKey(guestSessionID, email), "true", ttl).Err()
+}
+
+func (s *Store) IsEmailVerified(ctx context.Context, guestSessionID, email string) (bool, error) {
+	val, err := s.redis.Get(ctx, appredis.EmailVerifiedKey(guestSessionID, email)).Result()
+	if err != nil {
+		if errors.Is(err, rds.Nil) {
+			return false, nil
+		}
+		return false, err
+	}
+	return val == "true", nil
+}
+
+func (s *Store) DeleteEmailVerified(ctx context.Context, guestSessionID, email string) error {
+	return s.redis.Del(ctx, appredis.EmailVerifiedKey(guestSessionID, email)).Err()
 }
 
 func (s *Store) SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error {

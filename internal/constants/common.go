@@ -53,13 +53,23 @@ const (
 const (
 	RedisSessionKeyPattern           = "session:%s"
 	RedisCartKeyPattern              = "cart:%s"
-	RedisOTPKeyPattern               = "otp:%s"
-	RedisOTPRateLimitKeyPattern      = "otp:rate:%s"
+	RedisOTPKeyPattern               = "otp:%s:%s"
+	RedisOTPRateLimitKeyPattern      = "otp:rate:%s:%s"
 	RedisEmailOTPKeyPattern          = "email_otp:%s:%s"
 	RedisEmailOTPAttemptsKeyPattern  = "email_otp:attempts:%s:%s"
 	RedisEmailOTPRateLimitKeyPattern = "email_otp:rate:%s:%s"
+	RedisEmailVerifiedKeyPattern     = "email_verified:%s:%s"
 	RedisCaptchaRequiredKeyPattern   = "captcha:required:%s"
 	RedisSessionActiveValue          = "true"
+)
+
+// Email OTP keys serve two callers: pre-registration verification, scoped to a
+// guest session, and email changes, scoped to a logged-in user. Callers prefix
+// the identity with one of these so the two namespaces can never address the
+// same key even if a guest session ID happened to equal a user ID.
+const (
+	RedisScopeGuest = "guest"
+	RedisScopeUser  = "user"
 )
 
 const (

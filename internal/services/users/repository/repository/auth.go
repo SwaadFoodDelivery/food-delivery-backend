@@ -15,15 +15,14 @@ import (
 
 type Repository interface {
 	FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error)
-	FindUserByPhone(ctx context.Context, phone string) (*models.UserRow, error)
 	FindUserByID(ctx context.Context, userID string) (*models.UserRow, error)
 	UserExistsByPhoneRole(ctx context.Context, phone, role string) (bool, error)
 	UserExistsByEmailRole(ctx context.Context, email, role string) (bool, error)
 	CreateUser(ctx context.Context, in CreateUserInput) (string, error)
 	InsertAuditLog(ctx context.Context, in AuditLogInput) error
 
-	FindLatestActiveOTPByPhone(ctx context.Context, phone string) (*models.OTPRow, error)
-	FindLatestUnverifiedOTPByPhoneDevice(ctx context.Context, phone, deviceID string) (*models.OTPRow, error)
+	FindLatestActiveOTPByUser(ctx context.Context, userID string) (*models.OTPRow, error)
+	FindLatestUnverifiedOTPByUserDevice(ctx context.Context, userID, deviceID string) (*models.OTPRow, error)
 	CreateOTPRequest(ctx context.Context, in CreateOTPRequestInput) error
 	IncrementOTPResendCount(ctx context.Context, otpID string) error
 	IncrementOTPAttempts(ctx context.Context, otpID string) error
@@ -38,16 +37,19 @@ type Repository interface {
 
 	WithTx(ctx context.Context, fn func(tx Repository) error) error
 
-	GetOTPRateCount(ctx context.Context, phone string) (int, error)
+	GetOTPRateCount(ctx context.Context, phone, role string) (int, error)
 	IncrementNotFoundProbe(ctx context.Context, ip string, threshold int64, probeTTL, captchaTTL time.Duration) (bool, error)
-	SetOTPHashAndRate(ctx context.Context, phone, hash string, otpTTL, rateTTL time.Duration) error
-	ExpireOTP(ctx context.Context, phone string, ttl time.Duration) error
-	DeleteOTP(ctx context.Context, phone string) error
+	SetOTPHashAndRate(ctx context.Context, phone, role, hash string, otpTTL, rateTTL time.Duration) error
+	ExpireOTP(ctx context.Context, phone, role string, ttl time.Duration) error
+	DeleteOTP(ctx context.Context, phone, role string) error
 	GetEmailOTPRateCount(ctx context.Context, userID, email string) (int, error)
 	SetEmailOTPHashAndRate(ctx context.Context, userID, email, hash string, otpTTL, rateTTL time.Duration) error
 	GetEmailOTPHash(ctx context.Context, userID, email string) (string, error)
 	IncrementEmailOTPAttempts(ctx context.Context, userID, email string, ttl time.Duration) (int, error)
 	DeleteEmailOTP(ctx context.Context, userID, email string) error
+	SetEmailVerified(ctx context.Context, guestSessionID, email string, ttl time.Duration) error
+	IsEmailVerified(ctx context.Context, guestSessionID, email string) (bool, error)
+	DeleteEmailVerified(ctx context.Context, guestSessionID, email string) error
 	SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error
 	DeleteSession(ctx context.Context, sessionID string) error
 
@@ -59,6 +61,22 @@ type Repository interface {
 	UpdateOnboardingStatus(ctx context.Context, in UpdateOnboardingStatusInput) error
 	MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, s3Key string) (bool, error)
 	SetUserOnboardingComplete(ctx context.Context, userID string, isComplete bool) error
+
+	GetUserProfileByID(ctx context.Context, userID string) (*models.UserProfileRow, error)
+	GetClientProfileByUserID(ctx context.Context, userID string) (*models.ClientProfileRow, error)
+	GetDriverProfileByUserID(ctx context.Context, userID string) (*models.DriverProfileRow, error)
+	UpdateUserCore(ctx context.Context, userID, name string) error
+	UpdateUserEmail(ctx context.Context, userID, email string) error
+	UpsertClientProfile(ctx context.Context, userID, dateOfBirth, gender string) error
+	UpsertDriverProfile(ctx context.Context, userID string, isAvailable *bool, currentCity string) error
+	CountActiveAddresses(ctx context.Context, userID string) (int, error)
+	ListAddresses(ctx context.Context, userID string, offset, limit int) ([]models.AddressRow, error)
+	CountAddresses(ctx context.Context, userID string) (int, error)
+	UnsetDefaultAddress(ctx context.Context, userID string) error
+	CreateAddress(ctx context.Context, in CreateAddressInput) (*models.AddressRow, error)
+	FindAddressByIDAndUser(ctx context.Context, addressID, userID string) (*models.AddressRow, error)
+	UpdateAddress(ctx context.Context, in UpdateAddressInput) (*models.AddressRow, error)
+	SoftDeleteAddress(ctx context.Context, addressID, userID string) error
 }
 
 type repo struct {
@@ -71,11 +89,12 @@ type repo struct {
 }
 
 type CreateUserInput struct {
-	Phone        string
-	Name         string
-	Email        string
-	Role         string
-	ReferralCode string
+	Phone         string
+	Name          string
+	Email         string
+	Role          string
+	ReferralCode  string
+	EmailVerified bool
 }
 
 type AuditLogInput struct {
@@ -159,12 +178,12 @@ func IsNotFound(err error) bool {
 	return errors.IsNotFound(err)
 }
 
-func (r *repo) FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error) {
-	return r.pg.FindUserByPhoneAndRole(ctx, phone, role)
+func IsConflict(err error) bool {
+	return errors.IsConflict(err)
 }
 
-func (r *repo) FindUserByPhone(ctx context.Context, phone string) (*models.UserRow, error) {
-	return r.pg.FindUserByPhone(ctx, phone)
+func (r *repo) FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error) {
+	return r.pg.FindUserByPhoneAndRole(ctx, phone, role)
 }
 
 func (r *repo) FindUserByID(ctx context.Context, userID string) (*models.UserRow, error) {
@@ -180,19 +199,19 @@ func (r *repo) UserExistsByEmailRole(ctx context.Context, email, role string) (b
 }
 
 func (r *repo) CreateUser(ctx context.Context, in CreateUserInput) (string, error) {
-	return r.pg.CreateUser(ctx, in.Phone, in.Name, in.Email, in.Role, in.ReferralCode)
+	return r.pg.CreateUser(ctx, in.Phone, in.Name, in.Email, in.Role, in.ReferralCode, in.EmailVerified)
 }
 
 func (r *repo) InsertAuditLog(ctx context.Context, in AuditLogInput) error {
 	return r.pg.InsertAuditLog(ctx, in.ActorID, in.ActorRole, in.Action, in.EntityType, in.EntityID)
 }
 
-func (r *repo) FindLatestActiveOTPByPhone(ctx context.Context, phone string) (*models.OTPRow, error) {
-	return r.pg.FindLatestActiveOTPByPhone(ctx, phone)
+func (r *repo) FindLatestActiveOTPByUser(ctx context.Context, userID string) (*models.OTPRow, error) {
+	return r.pg.FindLatestActiveOTPByUser(ctx, userID)
 }
 
-func (r *repo) FindLatestUnverifiedOTPByPhoneDevice(ctx context.Context, phone, deviceID string) (*models.OTPRow, error) {
-	return r.pg.FindLatestUnverifiedOTPByPhoneDevice(ctx, phone, deviceID)
+func (r *repo) FindLatestUnverifiedOTPByUserDevice(ctx context.Context, userID, deviceID string) (*models.OTPRow, error) {
+	return r.pg.FindLatestUnverifiedOTPByUserDevice(ctx, userID, deviceID)
 }
 
 func (r *repo) CreateOTPRequest(ctx context.Context, in CreateOTPRequestInput) error {
@@ -235,24 +254,24 @@ func (r *repo) DeactivateSession(ctx context.Context, sessionID string) error {
 	return r.pg.DeactivateSession(ctx, sessionID)
 }
 
-func (r *repo) GetOTPRateCount(ctx context.Context, phone string) (int, error) {
-	return r.cache.GetOTPRateCount(ctx, phone)
+func (r *repo) GetOTPRateCount(ctx context.Context, phone, role string) (int, error) {
+	return r.cache.GetOTPRateCount(ctx, phone, role)
 }
 
 func (r *repo) IncrementNotFoundProbe(ctx context.Context, ip string, threshold int64, probeTTL, captchaTTL time.Duration) (bool, error) {
 	return r.cache.IncrementNotFoundProbe(ctx, ip, threshold, probeTTL, captchaTTL)
 }
 
-func (r *repo) SetOTPHashAndRate(ctx context.Context, phone, hash string, otpTTL, rateTTL time.Duration) error {
-	return r.cache.SetOTPHashAndRate(ctx, phone, hash, otpTTL, rateTTL)
+func (r *repo) SetOTPHashAndRate(ctx context.Context, phone, role, hash string, otpTTL, rateTTL time.Duration) error {
+	return r.cache.SetOTPHashAndRate(ctx, phone, role, hash, otpTTL, rateTTL)
 }
 
-func (r *repo) ExpireOTP(ctx context.Context, phone string, ttl time.Duration) error {
-	return r.cache.ExpireOTP(ctx, phone, ttl)
+func (r *repo) ExpireOTP(ctx context.Context, phone, role string, ttl time.Duration) error {
+	return r.cache.ExpireOTP(ctx, phone, role, ttl)
 }
 
-func (r *repo) DeleteOTP(ctx context.Context, phone string) error {
-	return r.cache.DeleteOTP(ctx, phone)
+func (r *repo) DeleteOTP(ctx context.Context, phone, role string) error {
+	return r.cache.DeleteOTP(ctx, phone, role)
 }
 
 func (r *repo) GetEmailOTPRateCount(ctx context.Context, userID, email string) (int, error) {
@@ -273,6 +292,18 @@ func (r *repo) IncrementEmailOTPAttempts(ctx context.Context, userID, email stri
 
 func (r *repo) DeleteEmailOTP(ctx context.Context, userID, email string) error {
 	return r.cache.DeleteEmailOTP(ctx, userID, email)
+}
+
+func (r *repo) SetEmailVerified(ctx context.Context, guestSessionID, email string, ttl time.Duration) error {
+	return r.cache.SetEmailVerified(ctx, guestSessionID, email, ttl)
+}
+
+func (r *repo) IsEmailVerified(ctx context.Context, guestSessionID, email string) (bool, error) {
+	return r.cache.IsEmailVerified(ctx, guestSessionID, email)
+}
+
+func (r *repo) DeleteEmailVerified(ctx context.Context, guestSessionID, email string) error {
+	return r.cache.DeleteEmailVerified(ctx, guestSessionID, email)
 }
 
 func (r *repo) SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error {
