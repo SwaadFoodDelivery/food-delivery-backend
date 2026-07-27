@@ -33,6 +33,26 @@ func TestValidateIndianPhone(t *testing.T) {
 	}
 }
 
+// A bare 10-digit number that happens to start with "91" (a real, allocated
+// range — e.g. 9123456789) must NOT be mistaken for <country-code>+<8 digits>.
+// Regression test for a bug where NormalizeE164 stripped "91" unconditionally.
+func TestNormalizeE164DoesNotMangleNumbersStartingWith91(t *testing.T) {
+	cases := map[string]string{
+		"9123456789":    "9123456789", // 10-digit local number starting with 91
+		"919123456789":  "9123456789", // country code + that same number
+		"+919123456789": "9123456789", // with a leading plus
+		"09123456789":   "9123456789", // trunk-prefixed
+	}
+	for input, want := range cases {
+		if got := NormalizeE164(input); got != want {
+			t.Fatalf("NormalizeE164(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if !ValidateIndianPhone("9123456789") {
+		t.Fatalf("expected 9123456789 to be a valid phone number")
+	}
+}
+
 func TestValidateOTP(t *testing.T) {
 	if !ValidateOTP("439954") {
 		t.Fatalf("expected otp valid")

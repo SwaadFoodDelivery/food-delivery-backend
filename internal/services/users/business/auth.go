@@ -325,10 +325,26 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 
 	if otpRec.ExpiresAt.Before(now) {
 		_ = s.repo.IncrementOTPAttempts(ctx, otpRec.OTPID)
+		// otpRec.Attempts is the count from before this increment (Postgres
+		// UPDATE ... SET attempts = attempts + 1 doesn't hand back the new
+		// value), so otpRec.Attempts+1 is what it is now. Blocking on that,
+		// rather than waiting for the NEXT call to see the stale count via the
+		// otpRec.Attempts >= AuthMaxOTPAttempts check above, matches the
+		// email-OTP path (which checks its own post-increment count) and the
+		// documented "5 wrong tries burns the code" contract — otherwise a 6th
+		// attempt was silently allowed before the block took effect.
+		if otpRec.Attempts+1 >= constants.AuthMaxOTPAttempts {
+			_ = s.repo.SetOTPBlockedUntil(ctx, otpRec.OTPID, now.Add(constants.AuthOTPBlockedWindow))
+			return nil, tooManyRequests(apperrors.CodeOTPMaxAttempts, "otp max attempts reached")
+		}
 		return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "otp expired", Details: []string{}}
 	}
 	if !utils.CompareOTP(otpRec.OTPHash, in.OTP) {
 		_ = s.repo.IncrementOTPAttempts(ctx, otpRec.OTPID)
+		if otpRec.Attempts+1 >= constants.AuthMaxOTPAttempts {
+			_ = s.repo.SetOTPBlockedUntil(ctx, otpRec.OTPID, now.Add(constants.AuthOTPBlockedWindow))
+			return nil, tooManyRequests(apperrors.CodeOTPMaxAttempts, "otp max attempts reached")
+		}
 		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid otp", Details: []string{}}
 	}
 	if otpRec.UserID == nil || *otpRec.UserID == "" {

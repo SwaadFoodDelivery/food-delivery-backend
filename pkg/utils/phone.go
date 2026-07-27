@@ -11,11 +11,25 @@ var (
 	otpRegex          = regexp.MustCompile(`^\d{6}$`)
 )
 
+// NormalizeE164 strips a country code or trunk prefix so downstream code
+// always sees a bare 10-digit subscriber number.
+//
+// The bare "91"/"0" strips are gated on total length: a 10-digit Indian mobile
+// number may itself start with "91" (e.g. 9123456789 is a real, valid number),
+// so stripping it unconditionally corrupted every such number to 8 digits and
+// failed it as invalid. Only strip when the extra 2 (or 1) digits are actually
+// present — i.e. the input as a whole looks like <prefix><10-digit number>,
+// not just a 10-digit number that happens to start the same way. "+91" stays
+// unconditional since the '+' already makes it unambiguous.
 func NormalizeE164(p string) string {
 	phone := strings.TrimSpace(p)
 	phone = strings.TrimPrefix(phone, "+91")
-	phone = strings.TrimPrefix(phone, "91")
-	phone = strings.TrimPrefix(phone, "0")
+	if len(phone) == 12 {
+		phone = strings.TrimPrefix(phone, "91")
+	}
+	if len(phone) == 11 {
+		phone = strings.TrimPrefix(phone, "0")
+	}
 	return phone
 }
 
