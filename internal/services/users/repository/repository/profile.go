@@ -51,8 +51,12 @@ func (r *repo) GetDriverProfileByUserID(ctx context.Context, userID string) (*mo
 	return r.pg.GetDriverProfileByUserID(ctx, userID)
 }
 
-func (r *repo) UpdateUserCore(ctx context.Context, userID, name, email string, resetEmailVerified bool) error {
-	return r.pg.UpdateUserCore(ctx, userID, name, email, resetEmailVerified)
+func (r *repo) UpdateUserCore(ctx context.Context, userID, name string) error {
+	return r.pg.UpdateUserCore(ctx, userID, name)
+}
+
+func (r *repo) UpdateUserEmail(ctx context.Context, userID, email string) error {
+	return r.pg.UpdateUserEmail(ctx, userID, email)
 }
 
 func (r *repo) UpsertClientProfile(ctx context.Context, userID, dateOfBirth, gender string) error {

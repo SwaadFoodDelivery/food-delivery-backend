@@ -10,7 +10,12 @@ import (
 	"food-delivery-backend/internal/services/users/models"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
+
+// pgUniqueViolation is the SQLSTATE Postgres raises when a unique index rejects
+// a write.
+const pgUniqueViolation = "23505"
 
 type Accessor interface {
 	Execer() sqlx.ExtContext
@@ -86,7 +91,10 @@ func (s *Store) CreateUser(ctx context.Context, phone, name, email, role, referr
 		VALUES ($1, $2, NULLIF($3, ''), $4, 'active', $6, FALSE, FALSE, FALSE, NOW(), NOW(), NULLIF($5, ''))
 		RETURNING user_id::text
 	`, phone, name, email, role, referralCode, emailVerified)
-	return userID, err
+	if err != nil {
+		return "", mapUniqueViolation(err)
+	}
+	return userID, nil
 }
 
 func (s *Store) InsertAuditLog(ctx context.Context, actorID, actorRole, action, entityType, entityID string) error {
@@ -208,6 +216,17 @@ func (s *Store) DeactivateSession(ctx context.Context, sessionID string) error {
 func mapNotFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return apperrors.ErrNotFound
+	}
+	return err
+}
+
+// mapUniqueViolation turns a lost race against a unique index into ErrConflict.
+// Callers pre-check for duplicates, but the check and the write are not atomic,
+// so the index is the real guarantee and this is how that surfaces as a 409.
+func mapUniqueViolation(err error) error {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == pgUniqueViolation {
+		return apperrors.ErrConflict
 	}
 	return err
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
-	"net/mail"
 	"strings"
 	"time"
 
@@ -12,11 +11,14 @@ import (
 	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/users/models"
 	"food-delivery-backend/internal/services/users/repository/repository"
+	"food-delivery-backend/pkg/utils"
 )
 
 type ProfileService interface {
 	GetProfile(ctx context.Context, in models.GetProfileInput) (*models.GetProfileOutput, *models.ServiceError)
 	UpdateProfile(ctx context.Context, in models.UpdateProfileInput) (*models.UpdateProfileOutput, *models.ServiceError)
+	SendEmailUpdateOTP(ctx context.Context, in models.SendEmailUpdateOTPInput) (*models.EmailOTPSendOutput, *models.ServiceError)
+	VerifyEmailUpdate(ctx context.Context, in models.VerifyEmailUpdateInput) (*models.UpdateProfileOutput, *models.ServiceError)
 	GetAddresses(ctx context.Context, in models.GetAddressesInput) (*models.GetAddressesOutput, *models.ServiceError)
 	CreateAddress(ctx context.Context, in models.CreateAddressInput) (*models.CreateAddressOutput, *models.ServiceError)
 	UpdateAddress(ctx context.Context, in models.UpdateAddressInput) (*models.UpdateAddressOutput, *models.ServiceError)
@@ -60,41 +62,22 @@ func (s *Service) UpdateProfile(ctx context.Context, in models.UpdateProfileInpu
 		return nil, internalErr("failed to load profile")
 	}
 
-	hasUpdate := in.Name != nil || in.Email != nil ||
+	hasUpdate := in.Name != nil ||
 		in.DateOfBirth != nil || in.Gender != nil ||
 		in.IsAvailable != nil || in.CurrentCity != nil
 	if !hasUpdate {
 		return nil, badRequest(apperrors.CodeNothingToUpdate, "no updatable fields provided")
 	}
 
-	// Resolve new core values (keep existing when nil)
+	// Resolve new core values (keep existing when nil). Email is not among them:
+	// it can only change through the OTP-verified flow below.
 	newName := user.Name
 	if in.Name != nil {
 		newName = strings.TrimSpace(*in.Name)
 	}
 
-	newEmail := user.Email.String
-	resetEmailVerified := false
-	if in.Email != nil {
-		candidate := strings.TrimSpace(*in.Email)
-		if _, parseErr := mail.ParseAddress(candidate); parseErr != nil {
-			return nil, badRequest(apperrors.CodeValidation, "invalid email address")
-		}
-		if !strings.EqualFold(candidate, user.Email.String) {
-			exists, checkErr := s.repo.UserExistsByEmailRole(ctx, candidate, user.Role)
-			if checkErr != nil {
-				return nil, internalErr("failed to check email availability")
-			}
-			if exists {
-				return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeEmailConflict, Message: "email is already in use", Details: []string{}}
-			}
-			newEmail = candidate
-			resetEmailVerified = true
-		}
-	}
-
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if txErr := tx.UpdateUserCore(ctx, userID, newName, newEmail, resetEmailVerified); txErr != nil {
+		if txErr := tx.UpdateUserCore(ctx, userID, newName); txErr != nil {
 			return txErr
 		}
 
@@ -141,6 +124,149 @@ func (s *Service) UpdateProfile(ctx context.Context, in models.UpdateProfileInpu
 	out := buildProfileOutput(updated)
 	out.Profile = s.loadRoleProfile(ctx, userID, updated.Role)
 	return out, nil
+}
+
+// ─── Email change ─────────────────────────────────────────────────────────────
+
+// SendEmailUpdateOTP dispatches an OTP to the address the user wants to move to.
+// It writes nothing: proving ownership comes first, and VerifyEmailUpdate is the
+// only thing that stores the address.
+func (s *Service) SendEmailUpdateOTP(ctx context.Context, in models.SendEmailUpdateOTPInput) (*models.EmailOTPSendOutput, *models.ServiceError) {
+	userID := strings.TrimSpace(in.UserID)
+	if userID == "" {
+		return nil, badRequest(apperrors.CodeValidation, "user ID is required")
+	}
+	emailAddr, svcErr := normalizeEmail(in.Email)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if s.emailProvider == nil {
+		return nil, internalErr("email provider is not configured")
+	}
+
+	user, err := s.repo.GetUserProfileByID(ctx, userID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeProfileNotFound, Message: "profile not found", Details: []string{}}
+		}
+		return nil, internalErr("failed to load profile")
+	}
+	if strings.EqualFold(emailAddr, user.Email.String) {
+		return nil, badRequest(apperrors.CodeEmailUnchanged, "email is already your current address")
+	}
+	if svcErr := s.assertEmailAvailable(ctx, emailAddr, user.Role); svcErr != nil {
+		return nil, svcErr
+	}
+
+	scope := userScope(userID)
+	if svcErr := s.enforceEmailOTPRate(ctx, scope, emailAddr); svcErr != nil {
+		return nil, svcErr
+	}
+	otpCode, hash, expiresAt, svcErr := createOTPBundle()
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if err := s.repo.SetEmailOTPHashAndRate(ctx, scope, emailAddr, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
+		return nil, internalErr("failed to store email otp")
+	}
+	if err := s.emailProvider.SendVerificationOTP(ctx, emailAddr, otpCode); err != nil {
+		return nil, internalErr("failed to dispatch email otp")
+	}
+	return emailOTPResponse(emailAddr, expiresAt, "OTP sent to the new email and valid for 10 minutes", true), nil
+}
+
+// VerifyEmailUpdate checks the OTP and commits the new address in the same call,
+// so an unverified email is never stored even briefly.
+func (s *Service) VerifyEmailUpdate(ctx context.Context, in models.VerifyEmailUpdateInput) (*models.UpdateProfileOutput, *models.ServiceError) {
+	userID := strings.TrimSpace(in.UserID)
+	if userID == "" {
+		return nil, badRequest(apperrors.CodeValidation, "user ID is required")
+	}
+	emailAddr, svcErr := normalizeEmail(in.Email)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if !utils.ValidateOTP(in.OTP) {
+		return nil, badRequest(apperrors.CodeValidation, "otp must be exactly 6 digits")
+	}
+
+	user, err := s.repo.GetUserProfileByID(ctx, userID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeProfileNotFound, Message: "profile not found", Details: []string{}}
+		}
+		return nil, internalErr("failed to load profile")
+	}
+
+	scope := userScope(userID)
+	hash, err := s.repo.GetEmailOTPHash(ctx, scope, emailAddr)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "email otp expired or not found", Details: []string{}}
+		}
+		return nil, internalErr("failed to fetch email otp")
+	}
+	if svcErr := s.verifyEmailOTPHash(ctx, scope, emailAddr, hash, in.OTP); svcErr != nil {
+		return nil, svcErr
+	}
+
+	// Re-checked after verification: the address may have been claimed in the
+	// minutes between the OTP being sent and the code coming back.
+	if svcErr := s.assertEmailAvailable(ctx, emailAddr, user.Role); svcErr != nil {
+		return nil, svcErr
+	}
+
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if txErr := tx.UpdateUserEmail(ctx, userID, emailAddr); txErr != nil {
+			return txErr
+		}
+		return tx.InsertAuditLog(ctx, repository.AuditLogInput{
+			ActorID:    userID,
+			ActorRole:  in.ActorRole,
+			Action:     constants.AuditActionEmailUpdate,
+			EntityType: constants.EntityTypeUsers,
+			EntityID:   userID,
+		})
+	})
+	if err != nil {
+		if repository.IsConflict(err) {
+			return nil, emailConflictErr()
+		}
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeProfileNotFound, Message: "profile not found", Details: []string{}}
+		}
+		return nil, internalErr("failed to update email")
+	}
+
+	_ = s.repo.DeleteEmailOTP(ctx, scope, emailAddr)
+
+	updated, err := s.repo.GetUserProfileByID(ctx, userID)
+	if err != nil {
+		return nil, internalErr("failed to reload profile")
+	}
+	out := buildProfileOutput(updated)
+	out.Profile = s.loadRoleProfile(ctx, userID, updated.Role)
+	return out, nil
+}
+
+func (s *Service) assertEmailAvailable(ctx context.Context, emailAddr, role string) *models.ServiceError {
+	exists, err := s.repo.UserExistsByEmailRole(ctx, emailAddr, role)
+	if err != nil {
+		return internalErr("failed to check email availability")
+	}
+	if exists {
+		return emailConflictErr()
+	}
+	return nil
+}
+
+func emailConflictErr() *models.ServiceError {
+	return &models.ServiceError{
+		StatusCode: http.StatusConflict,
+		Code:       apperrors.CodeEmailConflict,
+		Message:    "email is already in use",
+		Details:    []string{},
+	}
 }
 
 // ─── GetAddresses ─────────────────────────────────────────────────────────────

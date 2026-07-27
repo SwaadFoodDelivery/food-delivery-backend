@@ -55,17 +55,41 @@ func (s *Store) GetDriverProfileByUserID(ctx context.Context, userID string) (*m
 	return &row, nil
 }
 
-func (s *Store) UpdateUserCore(ctx context.Context, userID, name, email string, resetEmailVerified bool) error {
+// UpdateUserCore deliberately cannot write email. An email is only ever stored
+// after its owner has answered an OTP sent to it, which is UpdateUserEmail's job.
+func (s *Store) UpdateUserCore(ctx context.Context, userID, name string) error {
 	_, err := s.accessor.Execer().ExecContext(ctx, `
 		UPDATE users
-		SET name               = $2,
-		    email              = NULLIF($3, ''),
-		    email_verified     = CASE WHEN $4 THEN FALSE ELSE email_verified END,
-		    updated_at         = NOW()
+		SET name       = $2,
+		    updated_at = NOW()
 		WHERE user_id = $1::uuid
 		  AND is_deleted = FALSE
-	`, userID, name, email, resetEmailVerified)
+	`, userID, name)
 	return err
+}
+
+// UpdateUserEmail is called only once the OTP sent to the new address has been
+// answered, so the address lands already verified.
+func (s *Store) UpdateUserEmail(ctx context.Context, userID, email string) error {
+	res, err := s.accessor.Execer().ExecContext(ctx, `
+		UPDATE users
+		SET email          = $2,
+		    email_verified = TRUE,
+		    updated_at     = NOW()
+		WHERE user_id = $1::uuid
+		  AND is_deleted = FALSE
+	`, userID, email)
+	if err != nil {
+		return mapUniqueViolation(err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpsertClientProfile(ctx context.Context, userID, dateOfBirth, gender string) error {

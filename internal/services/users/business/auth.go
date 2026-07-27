@@ -107,7 +107,7 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 	if sid == "" {
 		return nil, badRequest(apperrors.CodeGuestTokenInvalid, "guest session is required")
 	}
-	verified, err := s.repo.IsEmailVerified(ctx, sid, email)
+	verified, err := s.repo.IsEmailVerified(ctx, guestScope(sid), email)
 	if err != nil {
 		return nil, internalErr("failed to check email verification")
 	}
@@ -185,11 +185,21 @@ func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*model
 		return nil
 	})
 	if err != nil {
+		// The pre-checks above are not atomic with the insert, so a concurrent
+		// registration can still lose the race against the unique indexes.
+		if repository.IsConflict(err) {
+			return nil, &models.ServiceError{
+				StatusCode: http.StatusConflict,
+				Code:       apperrors.CodePhoneAlreadyRegistered,
+				Message:    "phone or email already registered for this role",
+				Details:    []string{},
+			}
+		}
 		return nil, internalErr("failed to register user")
 	}
 
 	// One verification, one account.
-	_ = s.repo.DeleteEmailVerified(ctx, sid, email)
+	_ = s.repo.DeleteEmailVerified(ctx, guestScope(sid), email)
 
 	if err := s.otpProvider.Send(ctx, phone, otpCode); err != nil {
 		return nil, internalErr("failed to dispatch otp")
@@ -441,7 +451,8 @@ func (s *Service) SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput)
 	if s.emailProvider == nil {
 		return nil, internalErr("email provider is not configured")
 	}
-	if svcErr := s.enforceEmailOTPRate(ctx, sid, emailAddr); svcErr != nil {
+	scope := guestScope(sid)
+	if svcErr := s.enforceEmailOTPRate(ctx, scope, emailAddr); svcErr != nil {
 		return nil, svcErr
 	}
 
@@ -449,7 +460,7 @@ func (s *Service) SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput)
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	if err := s.repo.SetEmailOTPHashAndRate(ctx, sid, emailAddr, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
+	if err := s.repo.SetEmailOTPHashAndRate(ctx, scope, emailAddr, hash, constants.AuthOTPTTL, constants.AuthRateWindow); err != nil {
 		return nil, internalErr("failed to store email otp")
 	}
 	if err := s.emailProvider.SendVerificationOTP(ctx, emailAddr, otpCode); err != nil {
@@ -473,20 +484,21 @@ func (s *Service) VerifyEmail(ctx context.Context, in models.VerifyEmailInput) (
 		return nil, badRequest(apperrors.CodeValidation, "otp must be exactly 6 digits")
 	}
 
-	hash, err := s.repo.GetEmailOTPHash(ctx, sid, emailAddr)
+	scope := guestScope(sid)
+	hash, err := s.repo.GetEmailOTPHash(ctx, scope, emailAddr)
 	if err != nil {
 		if repository.IsNotFound(err) {
 			return nil, &models.ServiceError{StatusCode: http.StatusGone, Code: apperrors.CodeOTPExpired, Message: "email otp expired or not found", Details: []string{}}
 		}
 		return nil, internalErr("failed to fetch email otp")
 	}
-	if svcErr := s.verifyEmailOTPHash(ctx, sid, emailAddr, hash, in.OTP); svcErr != nil {
+	if svcErr := s.verifyEmailOTPHash(ctx, scope, emailAddr, hash, in.OTP); svcErr != nil {
 		return nil, svcErr
 	}
-	if err := s.repo.SetEmailVerified(ctx, sid, emailAddr, constants.AuthEmailVerifiedTTL); err != nil {
+	if err := s.repo.SetEmailVerified(ctx, scope, emailAddr, constants.AuthEmailVerifiedTTL); err != nil {
 		return nil, internalErr("failed to record email verification")
 	}
-	_ = s.repo.DeleteEmailOTP(ctx, sid, emailAddr)
+	_ = s.repo.DeleteEmailOTP(ctx, scope, emailAddr)
 	return verifyEmailResponse(emailAddr, true, "Email verified. Continue to registration within 30 minutes."), nil
 }
 
@@ -545,6 +557,18 @@ func (s *Service) verifyEmailOTPHash(ctx context.Context, userID, emailAddr, has
 		return tooManyRequests(apperrors.CodeOTPMaxAttempts, "email otp max attempts reached")
 	}
 	return &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeOTPInvalid, Message: "invalid email otp", Details: []string{}}
+}
+
+// guestScope and userScope namespace the email OTP keyspace by who the OTP
+// belongs to. Pre-registration OTPs belong to a guest session; email-change OTPs
+// belong to a logged-in user. Keeping them apart means an OTP issued in one
+// context can never be redeemed in the other.
+func guestScope(guestSessionID string) string {
+	return constants.RedisScopeGuest + ":" + guestSessionID
+}
+
+func userScope(userID string) string {
+	return constants.RedisScopeUser + ":" + userID
 }
 
 func normalizeEmail(emailAddr string) (string, *models.ServiceError) {

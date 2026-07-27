@@ -91,11 +91,13 @@ type GetProfileOutput struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// UpdateProfileInput has no Email field on purpose. Email changes go through
+// SendEmailUpdateOTP / VerifyEmailUpdate so the address is proven before it is
+// stored; leaving it out here makes the bypass structurally impossible.
 type UpdateProfileInput struct {
 	UserID      string
 	Role        string
 	Name        *string
-	Email       *string
 	DateOfBirth *string // YYYY-MM-DD, client only
 	Gender      *string // client only
 	IsAvailable *bool   // driver only
@@ -103,6 +105,18 @@ type UpdateProfileInput struct {
 }
 
 type UpdateProfileOutput = GetProfileOutput
+
+type SendEmailUpdateOTPInput struct {
+	UserID string
+	Email  string
+}
+
+type VerifyEmailUpdateInput struct {
+	UserID    string
+	ActorRole string
+	Email     string
+	OTP       string
+}
 
 type AddressItem struct {
 	AddressID    string   `json:"address_id"`
@@ -188,11 +202,19 @@ type DeleteAddressInput struct {
 
 type UpdateProfileRequest struct {
 	Name        *string `json:"name"`
-	Email       *string `json:"email"`
 	DateOfBirth *string `json:"date_of_birth"`
 	Gender      *string `json:"gender"`
 	IsAvailable *bool   `json:"is_available"`
 	CurrentCity *string `json:"current_city"`
+}
+
+type SendEmailUpdateOTPRequest struct {
+	Email string `json:"email"`
+}
+
+type VerifyEmailUpdateRequest struct {
+	Email string `json:"email"`
+	OTP   string `json:"otp"`
 }
 
 type CreateAddressRequest struct {

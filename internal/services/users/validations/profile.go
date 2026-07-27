@@ -8,6 +8,7 @@ import (
 
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/models"
+	"food-delivery-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,41 +16,65 @@ import (
 var rePhone = regexp.MustCompile(`^\+?[1-9]\d{6,14}$`)
 var rePincode = regexp.MustCompile(`^[A-Z0-9]{3,10}$`)
 
+// optionalString reads an optional field without asserting its type. A bare
+// v.(string) panics when the client sends {"name": 123}, which gin turns into a
+// 500; callers use `present` to skip absent fields and `isString` to reject
+// wrong-typed ones as a 400.
+func optionalString(in map[string]any, key string) (val string, present, isString bool) {
+	v, ok := in[key]
+	if !ok {
+		return "", false, false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", true, false
+	}
+	return strings.TrimSpace(s), true, true
+}
+
+func mustBeString(field string) middleware.ValidationDetail {
+	return middleware.ValidationDetail{Field: field, Message: "must be a string"}
+}
+
 // ValidateUpdateProfileBody is used by RequestValidator middleware.
 func ValidateUpdateProfileBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
 	req := models.UpdateProfileRequest{}
 	details := make([]middleware.ValidationDetail, 0)
 
-	if v, ok := input["name"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if s == "" || len(s) > 100 {
+	if s, present, isStr := optionalString(input, "name"); present {
+		if !isStr {
+			details = append(details, mustBeString("name"))
+		} else if s == "" || len(s) > 100 {
 			details = append(details, middleware.ValidationDetail{Field: "name", Message: "must be 1–100 characters"})
 		} else {
 			req.Name = &s
 		}
 	}
 
-	if v, ok := input["email"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if _, err := mail.ParseAddress(s); err != nil {
-			details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email address"})
-		} else {
-			req.Email = &s
-		}
+	// Email is rejected rather than ignored: silently dropping it would report
+	// success for a change that never happened.
+	if _, ok := input["email"]; ok {
+		details = append(details, middleware.ValidationDetail{
+			Field:   "email",
+			Message: "cannot be updated here; use POST /users/me/email/send-otp then POST /users/me/email/verify",
+		})
 	}
 
-	if v, ok := input["date_of_birth"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if _, err := time.Parse("2006-01-02", s); err != nil {
+	if s, present, isStr := optionalString(input, "date_of_birth"); present {
+		if !isStr {
+			details = append(details, mustBeString("date_of_birth"))
+		} else if _, err := time.Parse("2006-01-02", s); err != nil {
 			details = append(details, middleware.ValidationDetail{Field: "date_of_birth", Message: "must be YYYY-MM-DD"})
 		} else {
 			req.DateOfBirth = &s
 		}
 	}
 
-	if v, ok := input["gender"]; ok {
-		s := strings.TrimSpace(strings.ToLower(v.(string)))
-		if s != "male" && s != "female" && s != "other" {
+	if s, present, isStr := optionalString(input, "gender"); present {
+		s = strings.ToLower(s)
+		if !isStr {
+			details = append(details, mustBeString("gender"))
+		} else if s != "male" && s != "female" && s != "other" {
 			details = append(details, middleware.ValidationDetail{Field: "gender", Message: "must be male, female, or other"})
 		} else {
 			req.Gender = &s
@@ -65,13 +90,55 @@ func ValidateUpdateProfileBody(input map[string]any, _ *gin.Context) (any, []mid
 		}
 	}
 
-	if v, ok := input["current_city"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if len(s) > 80 {
+	if s, present, isStr := optionalString(input, "current_city"); present {
+		if !isStr {
+			details = append(details, mustBeString("current_city"))
+		} else if len(s) > 80 {
 			details = append(details, middleware.ValidationDetail{Field: "current_city", Message: "must be at most 80 characters"})
 		} else {
 			req.CurrentCity = &s
 		}
+	}
+
+	return req, details
+}
+
+// ValidateSendEmailUpdateOTPBody is used by RequestValidator middleware.
+func ValidateSendEmailUpdateOTPBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
+	req := models.SendEmailUpdateOTPRequest{}
+	details := make([]middleware.ValidationDetail, 0)
+
+	email := getString(input, "email")
+	if email == "" {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "is required"})
+	} else if _, err := mail.ParseAddress(email); err != nil {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email address"})
+	} else {
+		req.Email = email
+	}
+
+	return req, details
+}
+
+// ValidateVerifyEmailUpdateBody is used by RequestValidator middleware.
+func ValidateVerifyEmailUpdateBody(input map[string]any, _ *gin.Context) (any, []middleware.ValidationDetail) {
+	req := models.VerifyEmailUpdateRequest{}
+	details := make([]middleware.ValidationDetail, 0)
+
+	email := getString(input, "email")
+	if email == "" {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "is required"})
+	} else if _, err := mail.ParseAddress(email); err != nil {
+		details = append(details, middleware.ValidationDetail{Field: "email", Message: "must be a valid email address"})
+	} else {
+		req.Email = email
+	}
+
+	otpCode := getString(input, "otp")
+	if !utils.ValidateOTP(otpCode) {
+		details = append(details, middleware.ValidationDetail{Field: "otp", Message: "must be exactly 6 digits"})
+	} else {
+		req.OTP = otpCode
 	}
 
 	return req, details
@@ -142,58 +209,76 @@ func ValidateUpdateAddressBody(input map[string]any, _ *gin.Context) (any, []mid
 	req := models.UpdateAddressRequest{}
 	details := make([]middleware.ValidationDetail, 0)
 
-	if v, ok := input["line1"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if s == "" || len(s) > 255 {
+	if s, present, isStr := optionalString(input, "line1"); present {
+		if !isStr {
+			details = append(details, mustBeString("line1"))
+		} else if s == "" || len(s) > 255 {
 			details = append(details, middleware.ValidationDetail{Field: "line1", Message: "must be 1–255 characters"})
 		} else {
 			req.Line1 = &s
 		}
 	}
-	if v, ok := input["city"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if s == "" || len(s) > 100 {
+	if s, present, isStr := optionalString(input, "city"); present {
+		if !isStr {
+			details = append(details, mustBeString("city"))
+		} else if s == "" || len(s) > 100 {
 			details = append(details, middleware.ValidationDetail{Field: "city", Message: "must be 1–100 characters"})
 		} else {
 			req.City = &s
 		}
 	}
-	if v, ok := input["state"]; ok {
-		s := strings.TrimSpace(v.(string))
-		if s == "" || len(s) > 100 {
+	if s, present, isStr := optionalString(input, "state"); present {
+		if !isStr {
+			details = append(details, mustBeString("state"))
+		} else if s == "" || len(s) > 100 {
 			details = append(details, middleware.ValidationDetail{Field: "state", Message: "must be 1–100 characters"})
 		} else {
 			req.State = &s
 		}
 	}
-	if v, ok := input["pincode"]; ok {
-		s := strings.TrimSpace(strings.ToUpper(v.(string)))
-		if !rePincode.MatchString(s) {
+	if s, present, isStr := optionalString(input, "pincode"); present {
+		s = strings.ToUpper(s)
+		if !isStr {
+			details = append(details, mustBeString("pincode"))
+		} else if !rePincode.MatchString(s) {
 			details = append(details, middleware.ValidationDetail{Field: "pincode", Message: "must be 3–10 alphanumeric characters"})
 		} else {
 			req.Pincode = &s
 		}
 	}
 
-	if v, ok := input["line2"]; ok {
-		s := strings.TrimSpace(v.(string))
-		req.Line2 = &s
+	if s, present, isStr := optionalString(input, "line2"); present {
+		if !isStr {
+			details = append(details, mustBeString("line2"))
+		} else {
+			req.Line2 = &s
+		}
 	}
-	if v, ok := input["area"]; ok {
-		s := strings.TrimSpace(v.(string))
-		req.Area = &s
+	if s, present, isStr := optionalString(input, "area"); present {
+		if !isStr {
+			details = append(details, mustBeString("area"))
+		} else {
+			req.Area = &s
+		}
 	}
-	if v, ok := input["label"]; ok {
-		s := strings.TrimSpace(v.(string))
-		req.Label = &s
+	if s, present, isStr := optionalString(input, "label"); present {
+		if !isStr {
+			details = append(details, mustBeString("label"))
+		} else {
+			req.Label = &s
+		}
 	}
-	if v, ok := input["contact_name"]; ok {
-		s := strings.TrimSpace(v.(string))
-		req.ContactName = &s
+	if s, present, isStr := optionalString(input, "contact_name"); present {
+		if !isStr {
+			details = append(details, mustBeString("contact_name"))
+		} else {
+			req.ContactName = &s
+		}
 	}
-	if v, ok := input["contact_phone"]; ok {
-		cp := strings.TrimSpace(v.(string))
-		if cp != "" && !rePhone.MatchString(cp) {
+	if cp, present, isStr := optionalString(input, "contact_phone"); present {
+		if !isStr {
+			details = append(details, mustBeString("contact_phone"))
+		} else if cp != "" && !rePhone.MatchString(cp) {
 			details = append(details, middleware.ValidationDetail{Field: "contact_phone", Message: "must be a valid phone number"})
 		} else {
 			req.ContactPhone = &cp

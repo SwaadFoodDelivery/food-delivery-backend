@@ -65,7 +65,8 @@ type Repository interface {
 	GetUserProfileByID(ctx context.Context, userID string) (*models.UserProfileRow, error)
 	GetClientProfileByUserID(ctx context.Context, userID string) (*models.ClientProfileRow, error)
 	GetDriverProfileByUserID(ctx context.Context, userID string) (*models.DriverProfileRow, error)
-	UpdateUserCore(ctx context.Context, userID, name, email string, resetEmailVerified bool) error
+	UpdateUserCore(ctx context.Context, userID, name string) error
+	UpdateUserEmail(ctx context.Context, userID, email string) error
 	UpsertClientProfile(ctx context.Context, userID, dateOfBirth, gender string) error
 	UpsertDriverProfile(ctx context.Context, userID string, isAvailable *bool, currentCity string) error
 	CountActiveAddresses(ctx context.Context, userID string) (int, error)
@@ -175,6 +176,10 @@ func (r *repo) WithTx(ctx context.Context, fn func(tx Repository) error) error {
 
 func IsNotFound(err error) bool {
 	return errors.IsNotFound(err)
+}
+
+func IsConflict(err error) bool {
+	return errors.IsConflict(err)
 }
 
 func (r *repo) FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error) {

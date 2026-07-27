@@ -50,11 +50,53 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 		UserID:      toString(userID),
 		Role:        toString(role),
 		Name:        req.Name,
-		Email:       req.Email,
 		DateOfBirth: req.DateOfBirth,
 		Gender:      req.Gender,
 		IsAvailable: req.IsAvailable,
 		CurrentCity: req.CurrentCity,
+	})
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
+func (h *ProfileHandler) SendEmailUpdateOTP(c *gin.Context) {
+	req, ok := middleware.GetValidatedBody[models.SendEmailUpdateOTPRequest](c)
+	if !ok {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
+		return
+	}
+
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+
+	out, svcErr := h.svc.SendEmailUpdateOTP(c.Request.Context(), models.SendEmailUpdateOTPInput{
+		UserID: toString(userID),
+		Email:  req.Email,
+	})
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
+func (h *ProfileHandler) VerifyEmailUpdate(c *gin.Context) {
+	req, ok := middleware.GetValidatedBody[models.VerifyEmailUpdateRequest](c)
+	if !ok {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
+		return
+	}
+
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	role, _ := c.Get(constants.AuthContextRoleKey)
+
+	out, svcErr := h.svc.VerifyEmailUpdate(c.Request.Context(), models.VerifyEmailUpdateInput{
+		UserID:    toString(userID),
+		ActorRole: toString(role),
+		Email:     req.Email,
+		OTP:       req.OTP,
 	})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)

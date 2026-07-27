@@ -63,6 +63,15 @@ const (
 	RedisSessionActiveValue          = "true"
 )
 
+// Email OTP keys serve two callers: pre-registration verification, scoped to a
+// guest session, and email changes, scoped to a logged-in user. Callers prefix
+// the identity with one of these so the two namespaces can never address the
+// same key even if a guest session ID happened to equal a user ID.
+const (
+	RedisScopeGuest = "guest"
+	RedisScopeUser  = "user"
+)
+
 const (
 	S3BucketPurposeDefault    = "default"
 	S3BucketPurposeOnboarding = "onboarding"

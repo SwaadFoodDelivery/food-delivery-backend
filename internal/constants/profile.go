@@ -2,6 +2,7 @@ package constants
 
 const (
 	AuditActionProfileUpdate = "profile_update"
+	AuditActionEmailUpdate   = "email_update"
 	AuditActionAddressCreate = "address_create"
 	AuditActionAddressUpdate = "address_update"
 	AuditActionAddressDelete = "address_delete"

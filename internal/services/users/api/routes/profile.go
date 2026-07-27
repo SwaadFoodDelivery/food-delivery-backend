@@ -29,6 +29,22 @@ func RegisterProfileRoutes(_ *gin.RouterGroup, v1Protected *gin.RouterGroup, dep
 	)
 	profileUpdate.PUT("", h.UpdateProfile)
 
+	// Email changes are their own flow: the OTP proves the user owns the new
+	// address, and only the verify step writes it. Both are keyed by user ID —
+	// a logged-in caller can always mint a fresh guest token, so a guest-scoped
+	// limiter would be trivial to reset.
+	emailSendOTP := me.Group("/email/send-otp",
+		middleware.LeakyBucketRateLimit(deps.Redis, "profile_email_send_otp", 5.0/3600.0, 3, 3600, middleware.UserIDKeyFunc),
+		middleware.RequestValidator([]string{"email"}, validations.ValidateSendEmailUpdateOTPBody),
+	)
+	emailSendOTP.POST("", h.SendEmailUpdateOTP)
+
+	emailVerify := me.Group("/email/verify",
+		middleware.LeakyBucketRateLimit(deps.Redis, "profile_email_verify", 30.0/3600.0, 10, 3600, middleware.UserIDKeyFunc),
+		middleware.RequestValidator([]string{"email", "otp"}, validations.ValidateVerifyEmailUpdateBody),
+	)
+	emailVerify.POST("", h.VerifyEmailUpdate)
+
 	addrList := me.Group("/addresses",
 		middleware.LeakyBucketRateLimit(deps.Redis, "address_list", 60.0/60.0, 30, 60, middleware.UserIDKeyFunc),
 	)
