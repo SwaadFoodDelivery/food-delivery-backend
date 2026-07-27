@@ -10,6 +10,7 @@ const (
 	CodeEmailAlreadyRegistered = "EMAIL_ALREADY_REGISTERED"
 	CodeEmailAlreadyVerified   = "EMAIL_ALREADY_VERIFIED"
 	CodeEmailMissing           = "EMAIL_MISSING"
+	CodeEmailNotVerified       = "EMAIL_NOT_VERIFIED"
 	CodeAccountSuspended       = "ACCOUNT_SUSPENDED"
 	CodeOTPInvalid             = "OTP_INVALID"
 	CodeOTPMaxAttempts         = "OTP_MAX_ATTEMPTS"

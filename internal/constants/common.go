@@ -53,11 +53,12 @@ const (
 const (
 	RedisSessionKeyPattern           = "session:%s"
 	RedisCartKeyPattern              = "cart:%s"
-	RedisOTPKeyPattern               = "otp:%s"
-	RedisOTPRateLimitKeyPattern      = "otp:rate:%s"
+	RedisOTPKeyPattern               = "otp:%s:%s"
+	RedisOTPRateLimitKeyPattern      = "otp:rate:%s:%s"
 	RedisEmailOTPKeyPattern          = "email_otp:%s:%s"
 	RedisEmailOTPAttemptsKeyPattern  = "email_otp:attempts:%s:%s"
 	RedisEmailOTPRateLimitKeyPattern = "email_otp:rate:%s:%s"
+	RedisEmailVerifiedKeyPattern     = "email_verified:%s:%s"
 	RedisCaptchaRequiredKeyPattern   = "captcha:required:%s"
 	RedisSessionActiveValue          = "true"
 )

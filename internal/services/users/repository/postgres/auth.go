@@ -39,21 +39,6 @@ func (s *Store) FindUserByPhoneAndRole(ctx context.Context, phone, role string) 
 	return &row, nil
 }
 
-func (s *Store) FindUserByPhone(ctx context.Context, phone string) (*models.UserRow, error) {
-	var row models.UserRow
-	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
-		SELECT user_id::text, phone, role, name, email, email_verified, phone_verified, onboarding_complete, referral_code, account_status, created_at
-		FROM users
-		WHERE phone = $1 AND is_deleted = FALSE
-		ORDER BY created_at ASC
-		LIMIT 1
-	`, phone)
-	if err != nil {
-		return nil, mapNotFound(err)
-	}
-	return &row, nil
-}
-
 func (s *Store) FindUserByID(ctx context.Context, userID string) (*models.UserRow, error) {
 	var row models.UserRow
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
@@ -91,14 +76,16 @@ func (s *Store) UserExistsByEmailRole(ctx context.Context, email, role string) (
 	return exists, err
 }
 
-func (s *Store) CreateUser(ctx context.Context, phone, name, email, role, referralCode string) (string, error) {
+// CreateUser persists emailVerified as given: registration now requires the email
+// to have been verified beforehand, so the account starts with a verified email.
+func (s *Store) CreateUser(ctx context.Context, phone, name, email, role, referralCode string, emailVerified bool) (string, error) {
 	var userID string
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &userID, `
 		INSERT INTO users
 		(phone, name, email, role, account_status, email_verified, phone_verified, onboarding_complete, is_deleted, created_at, updated_at, referral_code)
-		VALUES ($1, $2, NULLIF($3, ''), $4, 'active', FALSE, FALSE, FALSE, FALSE, NOW(), NOW(), NULLIF($5, ''))
+		VALUES ($1, $2, NULLIF($3, ''), $4, 'active', $6, FALSE, FALSE, FALSE, NOW(), NOW(), NULLIF($5, ''))
 		RETURNING user_id::text
-	`, phone, name, email, role, referralCode)
+	`, phone, name, email, role, referralCode, emailVerified)
 	return userID, err
 }
 
@@ -110,30 +97,33 @@ func (s *Store) InsertAuditLog(ctx context.Context, actorID, actorRole, action, 
 	return err
 }
 
-func (s *Store) FindLatestActiveOTPByPhone(ctx context.Context, phone string) (*models.OTPRow, error) {
+// OTP rows are looked up by user_id rather than phone. The same phone number can
+// own one account per role, so a phone-keyed lookup would let an OTP issued for
+// one role be consumed by another.
+func (s *Store) FindLatestActiveOTPByUser(ctx context.Context, userID string) (*models.OTPRow, error) {
 	var row models.OTPRow
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
 		SELECT otp_id::text, user_id::text, phone, device_id, otp_hash, expires_at, is_verified, attempts, resend_count, blocked_until
 		FROM otp_requests
-		WHERE phone = $1 AND is_verified = FALSE AND expires_at > NOW()
+		WHERE user_id = $1::uuid AND is_verified = FALSE AND expires_at > NOW()
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, phone)
+	`, userID)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
 	return &row, nil
 }
 
-func (s *Store) FindLatestUnverifiedOTPByPhoneDevice(ctx context.Context, phone, deviceID string) (*models.OTPRow, error) {
+func (s *Store) FindLatestUnverifiedOTPByUserDevice(ctx context.Context, userID, deviceID string) (*models.OTPRow, error) {
 	var row models.OTPRow
 	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &row, `
 		SELECT otp_id::text, user_id::text, phone, device_id, otp_hash, expires_at, is_verified, attempts, resend_count, blocked_until
 		FROM otp_requests
-		WHERE phone = $1 AND device_id = $2 AND is_verified = FALSE
+		WHERE user_id = $1::uuid AND device_id = $2 AND is_verified = FALSE
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, phone, deviceID)
+	`, userID, deviceID)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}

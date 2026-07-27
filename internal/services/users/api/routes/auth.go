@@ -32,28 +32,32 @@ func RegisterAuthRoutes(v1Public *gin.RouterGroup, v1Protected *gin.RouterGroup,
 
 	sendOTP := publicAuth.Group("/send-otp",
 		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_otp_ip", 20.0/3600.0, 5, 3600, middleware.IPKeyFunc),
-		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_otp", 10.0/3600.0, 4, 3600, middleware.PhoneKeyFunc),
-		middleware.RequestValidator([]string{"phone"}, validations.ValidateSendOTPBody),
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_otp", 10.0/3600.0, 4, 3600, middleware.PhoneRoleKeyFunc),
+		middleware.RequestValidator([]string{"phone", "role"}, validations.ValidateSendOTPBody),
 	)
 	sendOTP.POST("", h.SendOTP)
 
 	verifyOTP := publicAuth.Group("/verify-otp",
-		middleware.RequestValidator([]string{"phone", "otp"}, validations.ValidateVerifyOTPBody),
+		middleware.RequestValidator([]string{"phone", "role", "otp"}, validations.ValidateVerifyOTPBody),
 	)
 	verifyOTP.POST("", h.VerifyOTP)
 
-	protectedAuth := v1Protected.Group("/auth")
-	sendEmailOTP := protectedAuth.Group("/send-email-otp",
-		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_email_otp", 5.0/3600.0, 3, 3600, middleware.UserIDKeyFunc),
+	// Email verification runs before an account exists, so it sits behind the guest
+	// token rather than an access token. Register refuses an unverified email.
+	sendEmailOTP := publicAuth.Group("/send-email-otp",
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_email_otp_ip", 20.0/3600.0, 5, 3600, middleware.IPKeyFunc),
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_send_email_otp", 5.0/3600.0, 3, 3600, middleware.GuestSessionKeyFunc),
+		middleware.RequestValidator([]string{"email"}, validations.ValidateSendEmailOTPBody),
 	)
 	sendEmailOTP.POST("", h.SendEmailOTP)
 
-	verifyEmail := protectedAuth.Group("/verify-email",
-		middleware.LeakyBucketRateLimit(deps.Redis, "auth_verify_email", 30.0/3600.0, 10, 3600, middleware.UserIDKeyFunc),
-		middleware.RequestValidator([]string{"otp"}, validations.ValidateVerifyEmailBody),
+	verifyEmail := publicAuth.Group("/verify-email",
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_verify_email", 30.0/3600.0, 10, 3600, middleware.GuestSessionKeyFunc),
+		middleware.RequestValidator([]string{"email", "otp"}, validations.ValidateVerifyEmailBody),
 	)
 	verifyEmail.POST("", h.VerifyEmail)
 
+	protectedAuth := v1Protected.Group("/auth")
 	logout := protectedAuth.Group("/logout",
 		middleware.LeakyBucketRateLimit(deps.Redis, "auth_logout", 10.0/60.0, 5, 60, middleware.UserIDKeyFunc),
 	)

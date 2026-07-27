@@ -53,14 +53,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	sid, _ := c.Get(constants.GuestTokenSessionIDKey)
 	out, svcErr := h.svc.Register(c.Request.Context(), models.RegisterInput{
-		Phone:        req.Phone,
-		Name:         req.Name,
-		Email:        req.Email,
-		ReferralCode: req.ReferralCode,
-		Role:         req.Role,
-		DeviceID:     strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
-		IPAddress:    c.ClientIP(),
+		Phone:          req.Phone,
+		Name:           req.Name,
+		Email:          req.Email,
+		ReferralCode:   req.ReferralCode,
+		Role:           req.Role,
+		DeviceID:       strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
+		IPAddress:      c.ClientIP(),
+		GuestSessionID: toString(sid),
 	})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)
@@ -78,6 +80,7 @@ func (h *AuthHandler) SendOTP(c *gin.Context) {
 
 	out, svcErr := h.svc.SendOTP(c.Request.Context(), models.SendOTPInput{
 		Phone:     req.Phone,
+		Role:      req.Role,
 		DeviceID:  strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
 		IPAddress: c.ClientIP(),
 	})
@@ -98,6 +101,7 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	clientType := strings.ToLower(strings.TrimSpace(c.GetHeader(constants.HeaderClientType)))
 	out, svcErr := h.svc.VerifyOTP(c.Request.Context(), models.VerifyOTPInput{
 		Phone:      req.Phone,
+		Role:       req.Role,
 		OTP:        req.OTP,
 		DeviceID:   strings.TrimSpace(c.GetHeader(constants.HeaderDeviceID)),
 		IPAddress:  c.ClientIP(),
@@ -118,9 +122,16 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 }
 
 func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
-	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	req, ok := middleware.GetValidatedBody[models.SendEmailOTPRequest](c)
+	if !ok {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
+		return
+	}
+
+	sid, _ := c.Get(constants.GuestTokenSessionIDKey)
 	out, svcErr := h.svc.SendEmailOTP(c.Request.Context(), models.SendEmailOTPInput{
-		UserID: toString(userID),
+		GuestSessionID: toString(sid),
+		Email:          req.Email,
 	})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)
@@ -136,10 +147,11 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	sid, _ := c.Get(constants.GuestTokenSessionIDKey)
 	out, svcErr := h.svc.VerifyEmail(c.Request.Context(), models.VerifyEmailInput{
-		UserID: toString(userID),
-		OTP:    req.OTP,
+		GuestSessionID: toString(sid),
+		Email:          req.Email,
+		OTP:            req.OTP,
 	})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)

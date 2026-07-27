@@ -125,6 +125,18 @@ func PhoneRoleKeyFunc(c *gin.Context) string {
 	return phone + ":" + role
 }
 
+// GuestSessionKeyFunc keys a limit by the guest session established at
+// /auth/init-session, for public endpoints that run before any user exists.
+func GuestSessionKeyFunc(c *gin.Context) string {
+	raw, _ := c.Get(constants.GuestTokenSessionIDKey)
+	sid, _ := raw.(string)
+	sid = strings.TrimSpace(sid)
+	if sid == "" {
+		return IPKeyFunc(c)
+	}
+	return sid
+}
+
 func UserIDKeyFunc(c *gin.Context) string {
 	raw, _ := c.Get(constants.AuthContextUserIDKey)
 	userID, _ := raw.(string)

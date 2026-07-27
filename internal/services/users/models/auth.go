@@ -21,23 +21,26 @@ type CheckPhoneInput struct {
 }
 
 type RegisterInput struct {
-	Phone        string
-	Name         string
-	Email        string
-	ReferralCode string
-	Role         string
-	DeviceID     string
-	IPAddress    string
+	Phone          string
+	Name           string
+	Email          string
+	ReferralCode   string
+	Role           string
+	DeviceID       string
+	IPAddress      string
+	GuestSessionID string
 }
 
 type SendOTPInput struct {
 	Phone     string
+	Role      string
 	DeviceID  string
 	IPAddress string
 }
 
 type VerifyOTPInput struct {
 	Phone      string
+	Role       string
 	OTP        string
 	DeviceID   string
 	IPAddress  string
@@ -45,13 +48,17 @@ type VerifyOTPInput struct {
 	ClientType string
 }
 
+// Email verification happens before an account exists, so it is scoped to the
+// caller's guest session rather than to a user ID.
 type SendEmailOTPInput struct {
-	UserID string
+	GuestSessionID string
+	Email          string
 }
 
 type VerifyEmailInput struct {
-	UserID string
-	OTP    string
+	GuestSessionID string
+	Email          string
+	OTP            string
 }
 
 type LogoutInput struct {
@@ -152,13 +159,20 @@ type RegisterRequest struct {
 
 type SendOTPRequest struct {
 	Phone string
+	Role  string
 }
 
 type VerifyOTPRequest struct {
 	Phone string
+	Role  string
 	OTP   string
 }
 
+type SendEmailOTPRequest struct {
+	Email string
+}
+
 type VerifyEmailRequest struct {
-	OTP string
+	Email string
+	OTP   string
 }
