@@ -89,6 +89,13 @@ func (s *Service) CheckPhone(ctx context.Context, in models.CheckPhoneInput) (*m
 }
 
 func (s *Service) Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError) {
+	// Defense in depth: ValidateRegisterBody already rejects this at the HTTP
+	// layer. Repeated here because a manager account being self-created would
+	// be a real privilege issue, not just a bad request, if that gate were ever
+	// bypassed or a future caller skipped the validator.
+	if strings.TrimSpace(in.Role) == constants.RoleRestaurantManager {
+		return nil, &models.ServiceError{StatusCode: http.StatusForbidden, Code: apperrors.CodeRoleNotSelfRegisterable, Message: "restaurant_manager accounts are created by the restaurant owner, not through sign-up", Details: []string{}}
+	}
 	phone, err := utils.RequireValidPhone(in.Phone)
 	if err != nil {
 		return nil, badRequest(apperrors.CodeInvalidPhone, err.Error())

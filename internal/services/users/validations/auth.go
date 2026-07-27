@@ -61,9 +61,14 @@ func ValidateRegisterBody(input map[string]any, c *gin.Context) (any, []middlewa
 		req.Email = email
 	}
 
+	// restaurant_manager is provisioned by that restaurant's owner, not through
+	// public sign-up — validRole() stays permissive for login/onboarding, where
+	// an already-provisioned manager account must keep working.
 	role := strings.TrimSpace(getString(input, "role"))
-	if !validRole(role) {
-		details = append(details, middleware.ValidationDetail{Field: "role", Message: "must be one of client, restaurant_owner, restaurant_manager, driver"})
+	if role == constants.RoleRestaurantManager {
+		details = append(details, middleware.ValidationDetail{Field: "role", Message: "restaurant_manager accounts are created by the restaurant owner, not through sign-up"})
+	} else if !validRole(role) {
+		details = append(details, middleware.ValidationDetail{Field: "role", Message: "must be one of client, restaurant_owner, driver"})
 	} else {
 		req.Role = role
 	}
