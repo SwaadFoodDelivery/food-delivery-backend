@@ -46,7 +46,7 @@ func (r *PostgresRepository) AddItem(ctx context.Context, in AddItemInput) (AddI
 		FROM menu_items i
 		JOIN restaurants r ON r.restaurant_id = i.restaurant_id AND r.status = 'active'
 		WHERE i.item_id = $1 AND i.is_deleted = FALSE
-		FOR UPDATE OF i`, in.ItemID); err != nil {
+		`, in.ItemID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return AddItemOutput{}, ErrItemNotFound
 		}
@@ -68,7 +68,7 @@ func (r *PostgresRepository) AddItem(ctx context.Context, in AddItemInput) (AddI
 			LEFT JOIN restaurants r ON r.restaurant_id = c.restaurant_id
 			WHERE c.cart_id = $1 AND c.user_id = $2 AND c.status = 'active'
 			  AND (c.expires_at IS NULL OR c.expires_at > NOW())
-			FOR UPDATE`, *in.CartID, in.UserID); err != nil {
+			FOR UPDATE OF c`, *in.CartID, in.UserID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return AddItemOutput{}, ErrCartNotFound
 			}
@@ -94,6 +94,23 @@ func (r *PostgresRepository) AddItem(ctx context.Context, in AddItemInput) (AddI
 			RETURNING cart_id`, in.UserID, deviceID, in.RestaurantID); err != nil {
 			return AddItemOutput{}, err
 		}
+	}
+	if err := tx.GetContext(ctx, &item, `
+		SELECT i.item_id, i.restaurant_id, i.name, i.price::text, r.name AS restaurant_name, i.is_available
+		FROM menu_items i
+		JOIN restaurants r ON r.restaurant_id = i.restaurant_id AND r.status = 'active'
+		WHERE i.item_id = $1 AND i.is_deleted = FALSE
+		FOR UPDATE OF i`, in.ItemID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AddItemOutput{}, ErrItemNotFound
+		}
+		return AddItemOutput{}, err
+	}
+	if item.RestaurantID != in.RestaurantID {
+		return AddItemOutput{}, ErrRestaurantMismatch
+	}
+	if !item.Available {
+		return AddItemOutput{}, ErrItemUnavailable
 	}
 
 	customisations, err := json.Marshal(in.Customisations)
