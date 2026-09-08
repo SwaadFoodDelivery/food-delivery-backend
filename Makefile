@@ -8,7 +8,7 @@ BACKEND_CONTAINER ?= food-delivery-backend
 POSTGRES_DB ?= food_delivery
 POSTGRES_USER ?= postgres
 
-.PHONY: compose-up compose-down compose-logs compose-ps compose-restart compose-build up down logs reset reset-volumes run test lint \
+.PHONY: compose-up compose-down compose-logs compose-ps compose-restart compose-build up down logs reset reset-volumes run test lint seed-demo \
 postgres-connect postgres-shell redis-connect redis-monitor redis-flushall \
 kafka-logs zookeeper-logs backend-logs minio-logs service-logs \
 backend-shell minio-shell
@@ -94,3 +94,6 @@ test:
 	go test -race ./...
 lint:
 	golangci-lint run
+
+seed-demo:
+	docker exec -i $(POSTGRES_CONTAINER) psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) -v ON_ERROR_STOP=1 < scripts/seed_demo.sql

@@ -6,6 +6,7 @@ import (
 	"food-delivery-backend/internal/app"
 	"food-delivery-backend/internal/middleware"
 	commonroutes "food-delivery-backend/internal/services/common/api/routes"
+	restaurantroutes "food-delivery-backend/internal/services/restaurant/api"
 	usersroutes "food-delivery-backend/internal/services/users/api/routes"
 	"food-delivery-backend/pkg/response"
 
@@ -25,6 +26,7 @@ func NewRouter(deps *app.Container) *gin.Engine {
 	protected.GET("/me", func(c *gin.Context) { response.Success(c, http.StatusOK, gin.H{"authenticated": true}) })
 
 	commonroutes.RegisterRoutes(public, protected, deps)
+	restaurantroutes.RegisterRoutes(public, deps)
 	usersroutes.RegisterRoutes(public, protected, deps)
 	return r
 }
