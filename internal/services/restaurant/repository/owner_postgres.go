@@ -106,6 +106,23 @@ type restaurantOrderRow struct {
 	UpdatedAt     time.Time `db:"updated_at"`
 }
 
+func (r *PostgresRepository) GetOwnedRestaurant(ctx context.Context, actorID uuid.UUID) (models.Restaurant, error) {
+	var row restaurantRow
+	if err := r.db.GetContext(ctx, &row, `
+		SELECT r.restaurant_id, r.name, r.description, r.cuisine_types,
+		       r.address_line1, r.area, r.city, r.state, r.pincode,
+		       r.latitude, r.longitude, 0 AS distance_km,
+		       r.service_radius_km, r.delivery_time_min, r.rating, r.total_ratings,
+		       r.is_open, r.logo_s3_key AS restaurant_profile_image
+		FROM restaurants r
+		WHERE r.owner_id = $1 AND r.status = 'active'
+		ORDER BY r.created_at ASC, r.restaurant_id ASC
+		LIMIT 1`, actorID); err != nil {
+		return models.Restaurant{}, err
+	}
+	return mapRestaurant(row), nil
+}
+
 func (r *PostgresRepository) ListOrders(ctx context.Context, actorID, restaurantID uuid.UUID) ([]models.RestaurantOrder, error) {
 	var rows []restaurantOrderRow
 	if err := r.db.SelectContext(ctx, &rows, `

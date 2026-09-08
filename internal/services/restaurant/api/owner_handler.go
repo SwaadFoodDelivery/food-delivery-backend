@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -31,6 +32,24 @@ type orderStatusRequest struct {
 }
 
 func newOwnerHandler(svc business.OwnerService) *ownerHandler { return &ownerHandler{svc: svc} }
+
+func (h *ownerHandler) GetOwnedRestaurant(c *gin.Context) {
+	actorID, ok := ownerActorID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "INVALID_TOKEN", "invalid user identity", []string{})
+		return
+	}
+	out, err := h.svc.GetOwnedRestaurant(c.Request.Context(), actorID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(c, http.StatusNotFound, "RESTAURANT_NOT_FOUND", "owned restaurant not found", []string{})
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, "RESTAURANT_LOOKUP_FAILED", "owned restaurant could not be loaded", []string{})
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
 
 func (h *ownerHandler) CreateItem(c *gin.Context) {
 	actorID, restaurantID, categoryID, ok := ownerIDs(c, true)
@@ -142,9 +161,8 @@ func ownerIDs(c *gin.Context, needsCategory bool) (uuid.UUID, uuid.UUID, uuid.UU
 }
 
 func ownerRestaurantIDs(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
-	actorRaw, ok := c.Get(constants.AuthContextUserIDKey)
-	actorID, err := uuid.Parse(strings.TrimSpace(valueString(actorRaw)))
-	if !ok || err != nil {
+	actorID, ok := ownerActorID(c)
+	if !ok {
 		response.Error(c, http.StatusUnauthorized, "INVALID_TOKEN", "invalid user identity", []string{})
 		return uuid.Nil, uuid.Nil, false
 	}
@@ -154,6 +172,15 @@ func ownerRestaurantIDs(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 		return uuid.Nil, uuid.Nil, false
 	}
 	return actorID, restaurantID, true
+}
+
+func ownerActorID(c *gin.Context) (uuid.UUID, bool) {
+	actorRaw, ok := c.Get(constants.AuthContextUserIDKey)
+	actorID, err := uuid.Parse(strings.TrimSpace(valueString(actorRaw)))
+	if !ok || err != nil {
+		return uuid.Nil, false
+	}
+	return actorID, true
 }
 
 func valueString(v any) string {

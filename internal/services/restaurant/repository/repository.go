@@ -27,6 +27,7 @@ type Repository interface {
 }
 
 type OwnerRepository interface {
+	GetOwnedRestaurant(context.Context, uuid.UUID) (models.Restaurant, error)
 	CreateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	UpdateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	DeleteItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error

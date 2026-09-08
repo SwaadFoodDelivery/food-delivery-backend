@@ -12,6 +12,7 @@ import (
 )
 
 type OwnerService interface {
+	GetOwnedRestaurant(context.Context, uuid.UUID) (models.Restaurant, error)
 	CreateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	UpdateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	DeleteItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error
@@ -22,6 +23,10 @@ type OwnerService interface {
 type ownerService struct{ repo repository.OwnerRepository }
 
 func NewOwnerService(repo repository.OwnerRepository) OwnerService { return &ownerService{repo: repo} }
+
+func (s *ownerService) GetOwnedRestaurant(ctx context.Context, actorID uuid.UUID) (models.Restaurant, error) {
+	return s.repo.GetOwnedRestaurant(ctx, actorID)
+}
 
 func (s *ownerService) CreateItem(ctx context.Context, actorID, restaurantID, categoryID uuid.UUID, item models.Item) (models.Item, error) {
 	if err := validateItem(item); err != nil {

@@ -26,4 +26,6 @@ func RegisterOwnerRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	orders := v1Protected.Group("/restaurants/:restaurantId", middleware.RequireRole(constants.RoleRestaurantOwner))
 	orders.GET("/orders", h.ListOrders)
 	orders.PATCH("/orders/:orderId/status", h.UpdateOrderStatus)
+	owned := v1Protected.Group("/owner", middleware.RequireRole(constants.RoleRestaurantOwner))
+	owned.GET("/restaurant", h.GetOwnedRestaurant)
 }
