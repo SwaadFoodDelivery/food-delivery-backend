@@ -12,6 +12,8 @@ import (
 type Service interface {
 	EnsureForOrder(context.Context, uuid.UUID, time.Time) error
 	GetForUser(context.Context, uuid.UUID, uuid.UUID) (models.Delivery, error)
+	GetForDriver(context.Context, uuid.UUID) (models.Delivery, error)
+	UpdateForDriver(context.Context, uuid.UUID, string) (models.Delivery, error)
 	Run(context.Context)
 }
 
@@ -34,6 +36,14 @@ func (s *MockService) EnsureForOrder(ctx context.Context, orderID uuid.UUID, cre
 
 func (s *MockService) GetForUser(ctx context.Context, userID, orderID uuid.UUID) (models.Delivery, error) {
 	return s.repo.GetForUser(ctx, userID, orderID)
+}
+
+func (s *MockService) GetForDriver(ctx context.Context, driverID uuid.UUID) (models.Delivery, error) {
+	return s.repo.GetForDriver(ctx, driverID)
+}
+
+func (s *MockService) UpdateForDriver(ctx context.Context, driverID uuid.UUID, next string) (models.Delivery, error) {
+	return s.repo.UpdateForDriver(ctx, driverID, next, s.duration)
 }
 
 func (s *MockService) Run(ctx context.Context) {

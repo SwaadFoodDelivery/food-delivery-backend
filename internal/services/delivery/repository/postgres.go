@@ -18,6 +18,7 @@ func NewPostgresRepository(db *sqlx.DB) *PostgresRepository { return &PostgresRe
 type deliveryRow struct {
 	DeliveryID       uuid.UUID  `db:"delivery_id"`
 	OrderID          uuid.UUID  `db:"order_id"`
+	OrderCreatedAt   time.Time  `db:"order_created_at"`
 	Provider         string     `db:"provider"`
 	Status           string     `db:"status"`
 	PartnerID        uuid.UUID  `db:"partner_id"`
@@ -45,6 +46,14 @@ func (r *PostgresRepository) EnsureMockDelivery(ctx context.Context, orderID uui
 			JOIN driver_profiles dp ON dp.user_id = u.user_id
 			WHERE u.role = 'driver' AND u.account_status = 'active' AND u.is_deleted = FALSE
 			  AND dp.is_available = TRUE
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM deliveries active_d
+				JOIN orders active_o ON active_o.order_id = active_d.order_id AND active_o.created_at = active_d.order_created_at
+				WHERE active_d.partner_id = u.user_id
+				  AND active_d.status <> 'delivered'
+				  AND active_o.status NOT IN ('cancelled', 'rejected', 'delivered')
+			  )
 			ORDER BY u.user_id
 			LIMIT 1
 			FOR UPDATE OF u`)
@@ -152,8 +161,86 @@ func (r *PostgresRepository) GetForUser(ctx context.Context, userID, orderID uui
 	return mapDelivery(row), nil
 }
 
+func (r *PostgresRepository) GetForDriver(ctx context.Context, driverID uuid.UUID) (models.Delivery, error) {
+	var row deliveryRow
+	err := r.db.GetContext(ctx, &row, deliverySelect+`
+		JOIN orders o ON o.order_id = d.order_id AND o.created_at = d.order_created_at
+		WHERE d.partner_id = $1
+		  AND d.provider = 'mock'
+		  AND d.status <> 'delivered'
+		  AND o.status NOT IN ('cancelled', 'rejected', 'delivered')
+		ORDER BY d.updated_at DESC
+		LIMIT 1`, driverID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.Delivery{}, ErrDeliveryNotFound
+	}
+	if err != nil {
+		return models.Delivery{}, err
+	}
+	return mapDelivery(row), nil
+}
+
+func (r *PostgresRepository) UpdateForDriver(ctx context.Context, driverID uuid.UUID, next string, duration time.Duration) (models.Delivery, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return models.Delivery{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var before deliveryRow
+	err = tx.GetContext(ctx, &before, deliverySelect+`
+		JOIN orders o ON o.order_id = d.order_id AND o.created_at = d.order_created_at
+		WHERE d.partner_id = $1
+		  AND d.provider = 'mock'
+		  AND d.status <> 'delivered'
+		  AND o.status NOT IN ('cancelled', 'rejected', 'delivered')
+		ORDER BY d.updated_at DESC
+		LIMIT 1
+		FOR UPDATE OF d, o`, driverID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.Delivery{}, ErrDeliveryNotFound
+	}
+	if err != nil {
+		return models.Delivery{}, err
+	}
+	if !validDriverTransition(before.Status, next) {
+		return models.Delivery{}, ErrInvalidTransition
+	}
+
+	step := duration / 5
+	if step < time.Second {
+		step = time.Second
+	}
+	var nextDue *time.Time
+	if next != models.StatusDelivered {
+		due := time.Now().UTC().Add(step)
+		nextDue = &due
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE deliveries
+		SET status = $1::delivery_status, next_transition_at = $2, updated_by = $3, updated_at = NOW()
+		WHERE delivery_id = $4`, next, nextDue, driverID, before.DeliveryID); err != nil {
+		return models.Delivery{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE orders
+		SET status = $1::order_status, updated_by = $2, updated_at = NOW()
+		WHERE order_id = $3 AND created_at = $4`, orderStatusForDelivery(next), driverID, before.OrderID, before.OrderCreatedAt); err != nil {
+		return models.Delivery{}, err
+	}
+
+	var after deliveryRow
+	if err := tx.GetContext(ctx, &after, deliverySelect+` WHERE d.delivery_id = $1`, before.DeliveryID); err != nil {
+		return models.Delivery{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.Delivery{}, err
+	}
+	return mapDelivery(after), nil
+}
+
 const deliverySelect = `
-	SELECT d.delivery_id, d.order_id, d.provider, d.status::text, d.partner_id,
+	SELECT d.delivery_id, d.order_id, d.order_created_at, d.provider, d.status::text, d.partner_id,
 	       u.name AS partner_name, u.phone AS partner_phone,
 	       d.assigned_at, d.updated_at, d.next_transition_at
 	FROM deliveries d JOIN users u ON u.user_id = d.partner_id`
@@ -182,6 +269,10 @@ func nextStatus(status string) string {
 	default:
 		return ""
 	}
+}
+
+func validDriverTransition(current, next string) bool {
+	return nextStatus(current) == next
 }
 
 func orderStatusForDelivery(status string) string {
