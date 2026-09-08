@@ -33,6 +33,9 @@ type Config struct {
 		GuestTokenSecret string
 		GuestTokenTTLMin int
 	}
+	Cart struct {
+		HMACSecret string
+	}
 	ClientAPIKey string
 	OTP          struct {
 		Provider   string
@@ -105,6 +108,7 @@ func Load() (*Config, error) {
 	cfg.JWT.Secret = viper.GetString("JWT_SECRET")
 	cfg.JWT.GuestTokenSecret = viper.GetString("GUEST_TOKEN_SECRET")
 	cfg.JWT.GuestTokenTTLMin = viper.GetInt("GUEST_TOKEN_TTL_MIN")
+	cfg.Cart.HMACSecret = strings.TrimSpace(viper.GetString("CART_HMAC_SECRET"))
 	cfg.ClientAPIKey = strings.TrimSpace(viper.GetString("CLIENT_API_KEY"))
 	cfg.OTP.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("OTP_PROVIDER")))
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")

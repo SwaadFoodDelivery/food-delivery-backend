@@ -164,6 +164,7 @@ services:
       JWT_SECRET: dev-secret-change-me-in-prod
       GUEST_TOKEN_SECRET: dev-guest-secret-change-me-in-prod-1234567890abcdef
       GUEST_TOKEN_TTL_MIN: "60"
+      CART_HMAC_SECRET: dev-cart-hmac-secret-change-me-in-prod-1234567890abcdef
       CLIENT_API_KEY: dev-client-api-key
       OTP_PROVIDER: mock
       EMAIL_PROVIDER: mock
