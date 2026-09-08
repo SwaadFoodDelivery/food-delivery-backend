@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrCartEmpty        = errors.New("cart empty")
+	ErrCartNotActive    = errors.New("cart not active")
 	ErrItemPriceChanged = errors.New("item price changed")
 	ErrItemUnavailable  = errors.New("item unavailable")
 	ErrAddressNotFound  = errors.New("address not found")

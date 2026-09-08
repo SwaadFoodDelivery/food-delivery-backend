@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -40,7 +41,12 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	out, err := h.svc.List(c.Request.Context(), repository.SearchFilter{Latitude: lat, Longitude: lon, RadiusKM: radius, Cuisine: c.Query("cuisine"), SortBy: c.Query("sort_by"), Offset: offset, Limit: limit})
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "INVALID_RESTAURANT_QUERY", err.Error(), []string{})
+		var validationErr *business.ValidationError
+		if errors.As(err, &validationErr) {
+			response.Error(c, http.StatusBadRequest, "INVALID_RESTAURANT_QUERY", validationErr.Error(), []string{})
+		} else {
+			response.Error(c, http.StatusInternalServerError, "RESTAURANT_LOOKUP_FAILED", "restaurants could not be loaded", []string{})
+		}
 		return
 	}
 	response.Success(c, http.StatusOK, out)

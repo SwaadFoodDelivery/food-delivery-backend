@@ -2,7 +2,7 @@ package business
 
 import (
 	"context"
-	"fmt"
+	"math"
 	"strings"
 
 	"food-delivery-backend/internal/services/restaurant/models"
@@ -18,21 +18,28 @@ type Service interface {
 
 type service struct{ repo repository.Repository }
 
+type ValidationError struct{ Message string }
+
+func (e *ValidationError) Error() string { return e.Message }
+
 func NewService(repo repository.Repository) Service { return &service{repo: repo} }
 
 func (s *service) List(ctx context.Context, filter repository.SearchFilter) (models.RestaurantList, error) {
 	if filter.RadiusKM <= 0 || filter.RadiusKM > 25 {
-		return models.RestaurantList{}, fmt.Errorf("radius_km must be between 0 and 25")
+		return models.RestaurantList{}, &ValidationError{Message: "radius_km must be between 0 and 25"}
+	}
+	if math.IsNaN(filter.RadiusKM) || math.IsInf(filter.RadiusKM, 0) {
+		return models.RestaurantList{}, &ValidationError{Message: "radius_km must be finite"}
 	}
 	if filter.Limit <= 0 || filter.Limit > 50 {
-		return models.RestaurantList{}, fmt.Errorf("limit must be between 1 and 50")
+		return models.RestaurantList{}, &ValidationError{Message: "limit must be between 1 and 50"}
 	}
 	if filter.Offset < 0 {
-		return models.RestaurantList{}, fmt.Errorf("offset must be non-negative")
+		return models.RestaurantList{}, &ValidationError{Message: "offset must be non-negative"}
 	}
 	filter.Cuisine = strings.TrimSpace(filter.Cuisine)
 	if filter.SortBy != "" && filter.SortBy != "rating" && filter.SortBy != "distance" {
-		return models.RestaurantList{}, fmt.Errorf("sort_by must be rating or distance")
+		return models.RestaurantList{}, &ValidationError{Message: "sort_by must be rating or distance"}
 	}
 	return s.repo.List(ctx, filter)
 }

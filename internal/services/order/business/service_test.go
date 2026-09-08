@@ -57,9 +57,9 @@ func TestPlaceReplaysBeforeReadingConvertedCart(t *testing.T) {
 	}
 }
 
-func TestPlaceRejectsInvalidIdempotencyKey(t *testing.T) {
+func TestPlaceRejectsOversizedIdempotencyKey(t *testing.T) {
 	svc := NewService(&fakeCartService{}, fakeOrderRepository{})
-	_, _, err := svc.Place(context.Background(), PlaceInput{UserID: uuid.New().String(), AddressID: uuid.New().String(), PaymentMethod: "upi", IdempotencyKey: "request-1"})
+	_, _, err := svc.Place(context.Background(), PlaceInput{UserID: uuid.New().String(), AddressID: uuid.New().String(), PaymentMethod: "upi", IdempotencyKey: "12345678901234567890123456789012345678901234567890123456789012345"})
 	serviceErr, ok := err.(*ServiceError)
 	if !ok || serviceErr.Code != "VALIDATION_ERROR" {
 		t.Fatalf("got %#v, want validation error", err)

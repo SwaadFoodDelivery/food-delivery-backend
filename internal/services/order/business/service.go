@@ -72,8 +72,8 @@ func (s *service) Place(ctx context.Context, in PlaceInput) (ordermodels.Order, 
 		return ordermodels.Order{}, false, err
 	}
 	key := strings.TrimSpace(in.IdempotencyKey)
-	if _, err := uuid.Parse(key); err != nil || len(key) > 64 {
-		return ordermodels.Order{}, false, &ServiceError{StatusCode: 400, Code: apperrors.CodeValidation, Message: "Idempotency-Key must be a UUID"}
+	if key == "" || len(key) > 64 {
+		return ordermodels.Order{}, false, &ServiceError{StatusCode: 400, Code: apperrors.CodeValidation, Message: "Idempotency-Key must be between 1 and 64 characters"}
 	}
 	method := strings.ToLower(strings.TrimSpace(in.PaymentMethod))
 	if method != "upi" && method != "card" && method != "cash_on_delivery" {
@@ -115,6 +115,8 @@ func mapRepositoryError(err error) error {
 	switch {
 	case errors.Is(err, repository.ErrCartEmpty):
 		return &ServiceError{StatusCode: 400, Code: "CART_EMPTY", Message: "cart is empty"}
+	case errors.Is(err, repository.ErrCartNotActive):
+		return &ServiceError{StatusCode: 409, Code: "CART_NOT_ACTIVE", Message: "cart has already been converted or expired"}
 	case errors.Is(err, repository.ErrItemPriceChanged):
 		return &ServiceError{StatusCode: 409, Code: "ITEM_PRICE_CHANGED", Message: "a menu item price changed; review your cart"}
 	case errors.Is(err, repository.ErrItemUnavailable):

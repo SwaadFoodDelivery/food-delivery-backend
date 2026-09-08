@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -109,10 +110,18 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return ordermodels.Order{}, false, err
 	}
-	if err := r.validateAddressTx(ctx, tx, in.UserID, in.AddressID, *cart.RestaurantID); err != nil {
+	lockedCart, err := r.lockActiveCart(ctx, tx, in.UserID, cart.CartID)
+	if err != nil {
 		return ordermodels.Order{}, false, err
 	}
-	if err := r.validateItemsTx(ctx, tx, *cart.RestaurantID, cart.Items); err != nil {
+	if len(lockedCart.Items) == 0 || lockedCart.RestaurantID == nil {
+		return ordermodels.Order{}, false, ErrCartEmpty
+	}
+	quote = quoteFor(lockedCart.Subtotal, time.Now().UTC())
+	if err := r.validateAddressTx(ctx, tx, in.UserID, in.AddressID, *lockedCart.RestaurantID); err != nil {
+		return ordermodels.Order{}, false, err
+	}
+	if err := r.validateItemsTx(ctx, tx, *lockedCart.RestaurantID, lockedCart.Items); err != nil {
 		return ordermodels.Order{}, false, err
 	}
 	var row orderRow
@@ -126,23 +135,99 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 		minorDecimal(quote.Subtotal), minorDecimal(quote.Taxes), minorDecimal(quote.DeliveryFee), minorDecimal(quote.Discount), minorDecimal(quote.TotalAmount), strings.TrimSpace(in.PaymentMethod), in.IdempotencyKey, strings.TrimSpace(in.Instructions)); err != nil {
 		return ordermodels.Order{}, false, err
 	}
-	for _, item := range cart.Items {
+	for _, item := range lockedCart.Items {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO order_items (order_id, order_created_at, item_id, item_name_snapshot, item_price_snapshot, quantity, line_total)
-			VALUES ($1, $2, $3, $4, $5::decimal, $6, $7::decimal)`, row.OrderID, row.CreatedAt, item.ItemID, item.Name, minorDecimal(item.UnitPrice), item.Quantity, minorDecimal(item.LineTotal)); err != nil {
+			INSERT INTO order_items (order_id, order_created_at, item_id, item_name_snapshot, item_price_snapshot, quantity, line_total, customisations)
+			VALUES ($1, $2, $3, $4, $5::decimal, $6, $7::decimal, $8::jsonb)`, row.OrderID, row.CreatedAt, item.ItemID, item.Name, minorDecimal(item.UnitPrice), item.Quantity, minorDecimal(item.LineTotal), mustJSON(item.Customisations)); err != nil {
 			return ordermodels.Order{}, false, err
 		}
 	}
-	if cart.CartID != uuid.Nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE carts SET status = 'converted', restaurant_id = NULL, updated_at = NOW() WHERE cart_id = $1 AND user_id = $2`, cart.CartID, in.UserID); err != nil {
-			return ordermodels.Order{}, false, err
-		}
+	result, err := tx.ExecContext(ctx, `UPDATE carts SET status = 'converted', restaurant_id = NULL, updated_at = NOW() WHERE cart_id = $1 AND user_id = $2 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())`, lockedCart.CartID, in.UserID)
+	if err != nil {
+		return ordermodels.Order{}, false, err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		return ordermodels.Order{}, false, ErrCartNotActive
 	}
 	if err := tx.Commit(); err != nil {
 		return ordermodels.Order{}, false, err
 	}
 	out, err := r.mapOrder(ctx, nil, row)
 	return out, false, err
+}
+
+func (r *PostgresRepository) lockActiveCart(ctx context.Context, tx *sqlx.Tx, userID, cartID uuid.UUID) (cartmodels.Cart, error) {
+	if cartID == uuid.Nil {
+		return cartmodels.Cart{}, ErrCartNotActive
+	}
+	var meta struct {
+		CartID       uuid.UUID      `db:"cart_id"`
+		RestaurantID *uuid.UUID     `db:"restaurant_id"`
+		Restaurant   sql.NullString `db:"restaurant_name"`
+	}
+	if err := tx.GetContext(ctx, &meta, `
+		SELECT c.cart_id, c.restaurant_id, r.name AS restaurant_name
+		FROM carts c LEFT JOIN restaurants r ON r.restaurant_id = c.restaurant_id
+		WHERE c.cart_id = $1 AND c.user_id = $2 AND c.status = 'active'
+		  AND (c.expires_at IS NULL OR c.expires_at > NOW())
+		FOR UPDATE OF c`, cartID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return cartmodels.Cart{}, ErrCartNotActive
+		}
+		return cartmodels.Cart{}, err
+	}
+	var rows []struct {
+		CartItemID     uuid.UUID       `db:"cart_item_id"`
+		ItemID         uuid.UUID       `db:"item_id"`
+		Name           string          `db:"name"`
+		Price          string          `db:"price"`
+		Quantity       int             `db:"quantity"`
+		Customisations json.RawMessage `db:"customisations"`
+	}
+	if err := tx.SelectContext(ctx, &rows, `
+		SELECT ci.cart_item_id, ci.item_id, i.name, i.price::text, ci.quantity, ci.customisations
+		FROM cart_items ci JOIN menu_items i ON i.item_id = ci.item_id
+		WHERE ci.cart_id = $1 ORDER BY ci.added_at, ci.cart_item_id`, cartID); err != nil {
+		return cartmodels.Cart{}, err
+	}
+	out := cartmodels.Cart{CartID: meta.CartID, RestaurantID: meta.RestaurantID, RestaurantName: nullString(meta.Restaurant), Items: make([]cartmodels.Item, 0, len(rows)), Currency: "INR"}
+	for _, row := range rows {
+		unit, err := decimalToMinor(row.Price)
+		if err != nil {
+			return cartmodels.Cart{}, err
+		}
+		customisations := []string{}
+		if len(row.Customisations) > 0 && string(row.Customisations) != "null" {
+			if err := json.Unmarshal(row.Customisations, &customisations); err != nil {
+				return cartmodels.Cart{}, err
+			}
+		}
+		lineTotal, ok := orderSafeMultiply(unit, int64(row.Quantity))
+		if !ok {
+			return cartmodels.Cart{}, fmt.Errorf("cart item total overflow")
+		}
+		out.Items = append(out.Items, cartmodels.Item{CartItemID: row.CartItemID, ItemID: row.ItemID, Name: row.Name, Quantity: row.Quantity, UnitPrice: unit, LineTotal: lineTotal, Customisations: customisations})
+		if lineTotal > int64(^uint64(0)>>1)-out.Subtotal {
+			return cartmodels.Cart{}, fmt.Errorf("cart subtotal overflow")
+		}
+		out.Subtotal += lineTotal
+	}
+	return out, nil
+}
+
+func orderSafeMultiply(a, b int64) (int64, bool) {
+	if a < 0 || b < 0 || (b != 0 && a > (int64(^uint64(0)>>1))/b) {
+		return 0, false
+	}
+	return a * b, true
+}
+
+func mustJSON(value []string) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }
 
 func (r *PostgresRepository) validateAddress(ctx context.Context, userID, addressID, restaurantID uuid.UUID) error {
@@ -269,23 +354,28 @@ func decimalToMinor(raw string) (int64, error) {
 func (r *PostgresRepository) mapOrder(ctx context.Context, tx *sqlx.Tx, row orderRow) (ordermodels.Order, error) {
 	out := ordermodels.Order{OrderID: row.OrderID, Status: row.Status, RestaurantID: row.RestaurantID, RestaurantName: row.Restaurant, Subtotal: mustMinor(row.Subtotal), Taxes: mustMinor(row.Taxes), DeliveryFee: mustMinor(row.DeliveryFee), Discount: mustMinor(row.Discount), TotalAmount: mustMinor(row.TotalAmount), Currency: "INR", PaymentMethod: row.PaymentMethod, AddressID: row.AddressID, Instructions: nullString(row.Instructions), CreatedAt: row.CreatedAt, EstimatedDelivery: row.CreatedAt.Add(ordermodels.EstimatedDeliveryMin * time.Minute), Items: []cartmodels.Item{}}
 	var rows []struct {
-		ItemID    uuid.UUID `db:"item_id"`
-		Name      string    `db:"item_name_snapshot"`
-		Price     string    `db:"item_price_snapshot"`
-		Quantity  int       `db:"quantity"`
-		LineTotal string    `db:"line_total"`
+		ItemID         uuid.UUID       `db:"item_id"`
+		Name           string          `db:"item_name_snapshot"`
+		Price          string          `db:"item_price_snapshot"`
+		Quantity       int             `db:"quantity"`
+		LineTotal      string          `db:"line_total"`
+		Customisations json.RawMessage `db:"customisations"`
 	}
 	var err error
 	if tx != nil {
-		err = tx.SelectContext(ctx, &rows, `SELECT item_id, item_name_snapshot, item_price_snapshot::text, quantity, line_total::text FROM order_items WHERE order_id = $1 AND order_created_at = $2 ORDER BY order_item_id`, row.OrderID, row.CreatedAt)
+		err = tx.SelectContext(ctx, &rows, `SELECT item_id, item_name_snapshot, item_price_snapshot::text, quantity, line_total::text, customisations FROM order_items WHERE order_id = $1 AND order_created_at = $2 ORDER BY order_item_id`, row.OrderID, row.CreatedAt)
 	} else {
-		err = r.db.SelectContext(ctx, &rows, `SELECT item_id, item_name_snapshot, item_price_snapshot::text, quantity, line_total::text FROM order_items WHERE order_id = $1 AND order_created_at = $2 ORDER BY order_item_id`, row.OrderID, row.CreatedAt)
+		err = r.db.SelectContext(ctx, &rows, `SELECT item_id, item_name_snapshot, item_price_snapshot::text, quantity, line_total::text, customisations FROM order_items WHERE order_id = $1 AND order_created_at = $2 ORDER BY order_item_id`, row.OrderID, row.CreatedAt)
 	}
 	if err != nil {
 		return ordermodels.Order{}, err
 	}
 	for _, item := range rows {
-		out.Items = append(out.Items, cartmodels.Item{ItemID: item.ItemID, Name: item.Name, UnitPrice: mustMinor(item.Price), Quantity: item.Quantity, LineTotal: mustMinor(item.LineTotal), Customisations: []string{}})
+		customisations := []string{}
+		if len(item.Customisations) > 0 && string(item.Customisations) != "null" {
+			_ = json.Unmarshal(item.Customisations, &customisations)
+		}
+		out.Items = append(out.Items, cartmodels.Item{ItemID: item.ItemID, Name: item.Name, UnitPrice: mustMinor(item.Price), Quantity: item.Quantity, LineTotal: mustMinor(item.LineTotal), Customisations: customisations})
 	}
 	return out, nil
 }
