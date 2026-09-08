@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -95,9 +96,15 @@ func coordinates(c *gin.Context) (float64, float64, error) {
 	if err != nil || lat < -90 || lat > 90 {
 		return 0, 0, queryError("latitude must be between -90 and 90")
 	}
+	if math.IsNaN(lat) || math.IsInf(lat, 0) {
+		return 0, 0, queryError("latitude must be finite")
+	}
 	lon, err := strconv.ParseFloat(c.Query("longitude"), 64)
 	if err != nil || lon < -180 || lon > 180 {
 		return 0, 0, queryError("longitude must be between -180 and 180")
+	}
+	if math.IsNaN(lon) || math.IsInf(lon, 0) {
+		return 0, 0, queryError("longitude must be finite")
 	}
 	return lat, lon, nil
 }

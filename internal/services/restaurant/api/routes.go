@@ -2,6 +2,7 @@ package api
 
 import (
 	"food-delivery-backend/internal/app"
+	"food-delivery-backend/internal/constants"
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/restaurant/business"
 	"food-delivery-backend/internal/services/restaurant/repository"
@@ -14,4 +15,12 @@ func RegisterRoutes(v1Public *gin.RouterGroup, deps *app.Container) {
 	restaurants.GET("", h.List)
 	restaurants.GET("/:restaurantId", h.Get)
 	restaurants.GET("/:restaurantId/menu", h.Menu)
+}
+
+func RegisterOwnerRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
+	h := newOwnerHandler(business.NewOwnerService(repository.NewPostgresRepository(deps.DB)))
+	restaurants := v1Protected.Group("/restaurants/:restaurantId/menu", middleware.RequireRole(constants.RoleRestaurantOwner))
+	restaurants.POST("/categories/:categoryId/items", h.CreateItem)
+	restaurants.PUT("/items/:itemId", h.UpdateItem)
+	restaurants.DELETE("/items/:itemId", h.DeleteItem)
 }

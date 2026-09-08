@@ -26,6 +26,12 @@ type Repository interface {
 	Menu(context.Context, uuid.UUID) (models.Menu, error)
 }
 
+type OwnerRepository interface {
+	CreateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
+	UpdateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
+	DeleteItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error
+}
+
 func DecodeCursor(raw string) (int, error) {
 	if raw == "" {
 		return 0, nil

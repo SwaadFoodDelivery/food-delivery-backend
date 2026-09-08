@@ -147,7 +147,7 @@ func (r *PostgresRepository) Get(ctx context.Context, userID, cartID uuid.UUID) 
 		ORDER BY ci.added_at, ci.cart_item_id`, cartID); err != nil {
 		return models.Cart{}, err
 	}
-	out := models.Cart{RestaurantID: meta.RestaurantID, RestaurantName: nullString(meta.Restaurant), Items: make([]models.Item, 0, len(rows)), Currency: "INR"}
+	out := models.Cart{CartID: meta.CartID, RestaurantID: meta.RestaurantID, RestaurantName: nullString(meta.Restaurant), Items: make([]models.Item, 0, len(rows)), Currency: "INR"}
 	for _, row := range rows {
 		unit, err := decimalToMinor(row.Price)
 		if err != nil {
@@ -179,7 +179,7 @@ func (r *PostgresRepository) DeleteItem(ctx context.Context, userID, cartID, car
 	}
 	defer func() { _ = tx.Rollback() }()
 	var locked uuid.UUID
-	if err := tx.GetContext(ctx, &locked, `SELECT cart_id FROM carts WHERE cart_id = $1 AND user_id = $2 AND status = 'active' FOR UPDATE`, cartID, userID); err != nil {
+	if err := tx.GetContext(ctx, &locked, `SELECT cart_id FROM carts WHERE cart_id = $1 AND user_id = $2 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW()) FOR UPDATE`, cartID, userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrCartNotFound
 		}
@@ -205,7 +205,7 @@ func (r *PostgresRepository) Clear(ctx context.Context, userID, cartID uuid.UUID
 	}
 	defer func() { _ = tx.Rollback() }()
 	var locked uuid.UUID
-	if err := tx.GetContext(ctx, &locked, `SELECT cart_id FROM carts WHERE cart_id = $1 AND user_id = $2 AND status = 'active' FOR UPDATE`, cartID, userID); err != nil {
+	if err := tx.GetContext(ctx, &locked, `SELECT cart_id FROM carts WHERE cart_id = $1 AND user_id = $2 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW()) FOR UPDATE`, cartID, userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrCartNotFound
 		}

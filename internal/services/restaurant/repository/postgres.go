@@ -124,6 +124,18 @@ type menuRow struct {
 }
 
 func (r *PostgresRepository) Menu(ctx context.Context, restaurantID uuid.UUID) (models.Menu, error) {
+	var exists bool
+	if err := r.db.GetContext(ctx, &exists, `
+		SELECT EXISTS (
+			SELECT 1 FROM menus m
+			JOIN restaurants r ON r.restaurant_id = m.restaurant_id AND r.status = 'active'
+			WHERE m.restaurant_id = $1
+		)`, restaurantID); err != nil {
+		return models.Menu{}, err
+	}
+	if !exists {
+		return models.Menu{}, sql.ErrNoRows
+	}
 	const query = `
 		SELECT c.category_id, c.name AS category_name, c.sort_order AS category_sort_order,
 		       i.item_id, i.name AS item_name, i.description, i.price, i.image_s3_key,

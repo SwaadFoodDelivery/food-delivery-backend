@@ -3,6 +3,7 @@ package models
 import "github.com/google/uuid"
 
 type Cart struct {
+	CartID         uuid.UUID  `json:"-"`
 	CartToken      string     `json:"cart_token"`
 	RestaurantID   *uuid.UUID `json:"restaurant_id,omitempty"`
 	RestaurantName string     `json:"restaurant_name,omitempty"`
