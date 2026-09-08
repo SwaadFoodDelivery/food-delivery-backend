@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	apperrors "food-delivery-backend/internal/errors"
 	cartbusiness "food-delivery-backend/internal/services/cart/business"
@@ -16,6 +17,10 @@ import (
 type Service interface {
 	Quote(context.Context, QuoteInput) (ordermodels.Quote, error)
 	Place(context.Context, PlaceInput) (ordermodels.Order, bool, error)
+}
+
+type DeliveryService interface {
+	EnsureForOrder(context.Context, uuid.UUID, time.Time) error
 }
 
 type QuoteInput struct {
@@ -42,12 +47,17 @@ type ServiceError struct {
 func (e *ServiceError) Error() string { return e.Message }
 
 type service struct {
-	carts cartbusiness.Service
-	repo  repository.Repository
+	carts    cartbusiness.Service
+	repo     repository.Repository
+	delivery DeliveryService
 }
 
-func NewService(carts cartbusiness.Service, repo repository.Repository) Service {
-	return &service{carts: carts, repo: repo}
+func NewService(carts cartbusiness.Service, repo repository.Repository, deliveries ...DeliveryService) Service {
+	var delivery DeliveryService
+	if len(deliveries) > 0 {
+		delivery = deliveries[0]
+	}
+	return &service{carts: carts, repo: repo, delivery: delivery}
 }
 
 func (s *service) Quote(ctx context.Context, in QuoteInput) (ordermodels.Quote, error) {
@@ -82,6 +92,9 @@ func (s *service) Place(ctx context.Context, in PlaceInput) (ordermodels.Order, 
 	if existing, replay, err := s.repo.FindByIdempotency(ctx, userID, key); err != nil {
 		return ordermodels.Order{}, false, err
 	} else if replay {
+		if err := s.ensureDelivery(ctx, existing); err != nil {
+			return ordermodels.Order{}, false, err
+		}
 		return existing, true, nil
 	}
 	cart, err := s.carts.Get(ctx, cartbusiness.GetInput{UserID: userID.String(), CartToken: strings.TrimSpace(in.CartToken)})
@@ -96,7 +109,20 @@ func (s *service) Place(ctx context.Context, in PlaceInput) (ordermodels.Order, 
 	if err != nil {
 		return ordermodels.Order{}, false, mapRepositoryError(err)
 	}
+	if err := s.ensureDelivery(ctx, out); err != nil {
+		return ordermodels.Order{}, false, err
+	}
 	return out, replay, nil
+}
+
+func (s *service) ensureDelivery(ctx context.Context, order ordermodels.Order) error {
+	if s.delivery == nil {
+		return nil
+	}
+	if err := s.delivery.EnsureForOrder(ctx, order.OrderID, order.CreatedAt); err != nil {
+		return &ServiceError{StatusCode: 503, Code: "DELIVERY_UNAVAILABLE", Message: "mock delivery partner is unavailable"}
+	}
+	return nil
 }
 
 func parseIDs(userIDRaw, addressIDRaw string) (uuid.UUID, uuid.UUID, error) {

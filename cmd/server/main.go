@@ -19,6 +19,8 @@ import (
 	"food-delivery-backend/internal/services/common/email"
 	"food-delivery-backend/internal/services/common/otp"
 	"food-delivery-backend/internal/services/common/storage"
+	deliverybusiness "food-delivery-backend/internal/services/delivery/business"
+	deliveryrepository "food-delivery-backend/internal/services/delivery/repository"
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/logger"
 
@@ -33,6 +35,9 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		panic(err)
+	}
+	if cfg.Delivery.Provider != constants.ProviderMock {
+		panic("unsupported DELIVERY_PROVIDER: only mock is implemented for this demonstration app")
 	}
 	log, err := logger.New(cfg.App.Env, cfg.App.LogLevel)
 	if err != nil {
@@ -80,6 +85,10 @@ func main() {
 	}
 
 	natsPublisher := infraNATS.NewPublisher(js)
+	deliveryService := deliverybusiness.NewMockService(deliveryrepository.NewPostgresRepository(db), time.Duration(cfg.Delivery.MockDurationSeconds)*time.Second)
+	deliveryCtx, deliveryCancel := context.WithCancel(context.Background())
+	defer deliveryCancel()
+	go deliveryService.Run(deliveryCtx)
 
 	oc := initOrderClient(startupCtx, startupLog, cfg)
 
@@ -124,6 +133,7 @@ func main() {
 		OTPProvider:     otpProvider,
 		EmailProvider:   emailProvider,
 		StorageProvider: storageProvider,
+		DeliveryService: deliveryService,
 	}
 	eng := router.NewRouter(deps)
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: eng}

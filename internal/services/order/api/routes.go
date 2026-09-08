@@ -13,7 +13,7 @@ import (
 
 func RegisterRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	carts := cartbusiness.NewService(repository.NewPostgresRepository(deps.DB), deps.Config.Cart.HMACSecret)
-	svc := business.NewService(carts, orderrepository.NewPostgresRepository(deps.DB))
+	svc := business.NewService(carts, orderrepository.NewPostgresRepository(deps.DB), deps.DeliveryService)
 	h := NewHandler(svc)
 	orders := v1Protected.Group("/orders", middleware.LeakyBucketRateLimit(deps.Redis, "orders", 10.0/60.0, 10, 60, middleware.UserIDKeyFunc))
 	orders.POST("/quote", h.Quote)

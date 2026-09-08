@@ -36,6 +36,10 @@ type Config struct {
 	Cart struct {
 		HMACSecret string
 	}
+	Delivery struct {
+		Provider            string
+		MockDurationSeconds int
+	}
 	ClientAPIKey string
 	OTP          struct {
 		Provider   string
@@ -109,6 +113,8 @@ func Load() (*Config, error) {
 	cfg.JWT.GuestTokenSecret = viper.GetString("GUEST_TOKEN_SECRET")
 	cfg.JWT.GuestTokenTTLMin = viper.GetInt("GUEST_TOKEN_TTL_MIN")
 	cfg.Cart.HMACSecret = strings.TrimSpace(viper.GetString("CART_HMAC_SECRET"))
+	cfg.Delivery.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("DELIVERY_PROVIDER")))
+	cfg.Delivery.MockDurationSeconds = viper.GetInt("MOCK_DELIVERY_DURATION_SECONDS")
 	cfg.ClientAPIKey = strings.TrimSpace(viper.GetString("CLIENT_API_KEY"))
 	cfg.OTP.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("OTP_PROVIDER")))
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")
@@ -144,6 +150,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.OTP.Provider == "" {
 		cfg.OTP.Provider = constants.ProviderMock
+	}
+	if cfg.Delivery.Provider == "" {
+		cfg.Delivery.Provider = constants.ProviderMock
+	}
+	if cfg.Delivery.MockDurationSeconds <= 0 {
+		cfg.Delivery.MockDurationSeconds = 600
 	}
 	if cfg.Email.Provider == "" {
 		cfg.Email.Provider = constants.ProviderMock
