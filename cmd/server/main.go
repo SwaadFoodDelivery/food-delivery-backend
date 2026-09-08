@@ -39,6 +39,9 @@ func main() {
 	if cfg.Delivery.Provider != constants.ProviderMock {
 		panic("unsupported DELIVERY_PROVIDER: only mock is implemented for this demonstration app")
 	}
+	if cfg.Payment.Provider != constants.ProviderMock {
+		panic("unsupported PAYMENT_PROVIDER: only mock is implemented for this demonstration app")
+	}
 	log, err := logger.New(cfg.App.Env, cfg.App.LogLevel)
 	if err != nil {
 		panic(err)
