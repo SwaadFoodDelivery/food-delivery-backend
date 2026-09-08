@@ -8,8 +8,18 @@ VALUES
  ('00000000-0000-4000-8000-000000000002', '9000000002', 'Swaad Demo Owner 2', 'demo-owner-2@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
  ('00000000-0000-4000-8000-000000000003', '9000000003', 'Swaad Demo Owner 3', 'demo-owner-3@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
  ('00000000-0000-4000-8000-000000000004', '9000000004', 'Swaad Demo Owner 4', 'demo-owner-4@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
- ('00000000-0000-4000-8000-000000000005', '9000000005', 'Swaad Demo Owner 5', 'demo-owner-5@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE)
+ ('00000000-0000-4000-8000-000000000005', '9000000005', 'Swaad Demo Owner 5', 'demo-owner-5@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
+ ('00000000-0000-4000-8000-000000000011', '9000000011', 'Swaad Demo Driver 1', 'demo-driver-1@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE),
+ ('00000000-0000-4000-8000-000000000012', '9000000012', 'Swaad Demo Driver 2', 'demo-driver-2@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE)
 ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, account_status = 'active', is_deleted = FALSE;
+
+-- Fictional development-only delivery partners. The encrypted bytea values are
+-- placeholders and must never be used as real identity or vehicle documents.
+INSERT INTO driver_profiles (user_id, driving_license_number_encrypted, vehicle_registration_encrypted, is_available, current_city)
+VALUES
+ ('00000000-0000-4000-8000-000000000011', decode('ZGVtby1saWNlbnNlLTE=', 'base64'), decode('ZGVtby12ZWhpY2xlLTE=', 'base64'), TRUE, 'Shamgarh'),
+ ('00000000-0000-4000-8000-000000000012', decode('ZGVtby1saWNlbnNlLTI=', 'base64'), decode('ZGVtby12ZWhpY2xlLTI=', 'base64'), TRUE, 'Shamgarh')
+ON CONFLICT (user_id) DO UPDATE SET is_available = EXCLUDED.is_available, current_city = EXCLUDED.current_city;
 
 INSERT INTO restaurants (restaurant_id, owner_id, name, description, cuisine_types, address_line1, area, city, state, pincode, latitude, longitude, location, service_radius_km, delivery_time_min, opening_cron, is_open, rating, total_ratings, status)
 VALUES
