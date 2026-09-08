@@ -15,6 +15,8 @@ type OwnerService interface {
 	CreateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	UpdateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	DeleteItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error
+	ListOrders(context.Context, uuid.UUID, uuid.UUID) ([]models.RestaurantOrder, error)
+	UpdateOrderStatus(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (models.RestaurantOrder, error)
 }
 
 type ownerService struct{ repo repository.OwnerRepository }
@@ -37,6 +39,18 @@ func (s *ownerService) UpdateItem(ctx context.Context, actorID, restaurantID, it
 
 func (s *ownerService) DeleteItem(ctx context.Context, actorID, restaurantID, itemID uuid.UUID) error {
 	return s.repo.DeleteItem(ctx, actorID, restaurantID, itemID)
+}
+
+func (s *ownerService) ListOrders(ctx context.Context, actorID, restaurantID uuid.UUID) ([]models.RestaurantOrder, error) {
+	return s.repo.ListOrders(ctx, actorID, restaurantID)
+}
+
+func (s *ownerService) UpdateOrderStatus(ctx context.Context, actorID, restaurantID, orderID uuid.UUID, next string) (models.RestaurantOrder, error) {
+	next = strings.ToLower(strings.TrimSpace(next))
+	if next != "accepted" && next != "preparing" && next != "ready_for_pickup" && next != "rejected" {
+		return models.RestaurantOrder{}, fmt.Errorf("status must be accepted, preparing, ready_for_pickup, or rejected")
+	}
+	return s.repo.UpdateOrderStatus(ctx, actorID, restaurantID, orderID, next)
 }
 
 func validateItem(item models.Item) error {

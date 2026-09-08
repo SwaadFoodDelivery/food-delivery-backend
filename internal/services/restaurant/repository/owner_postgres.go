@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"food-delivery-backend/internal/services/restaurant/models"
 	"github.com/google/uuid"
@@ -94,6 +95,98 @@ func (r *PostgresRepository) DeleteItem(ctx context.Context, actorID, restaurant
 		return err
 	}
 	return tx.Commit()
+}
+
+type restaurantOrderRow struct {
+	OrderID       uuid.UUID `db:"order_id"`
+	Status        string    `db:"status"`
+	TotalAmount   string    `db:"total_amount"`
+	PaymentMethod string    `db:"payment_method"`
+	CreatedAt     time.Time `db:"created_at"`
+	UpdatedAt     time.Time `db:"updated_at"`
+}
+
+func (r *PostgresRepository) ListOrders(ctx context.Context, actorID, restaurantID uuid.UUID) ([]models.RestaurantOrder, error) {
+	var rows []restaurantOrderRow
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT o.order_id, o.status::text, o.total_amount::text, o.payment_method, o.created_at, o.updated_at
+		FROM orders o JOIN restaurants r ON r.restaurant_id = o.restaurant_id
+		WHERE o.restaurant_id = $1 AND r.owner_id = $2
+		ORDER BY o.created_at DESC LIMIT 50`, restaurantID, actorID); err != nil {
+		return nil, err
+	}
+	out := make([]models.RestaurantOrder, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mapRestaurantOrder(row))
+	}
+	return out, nil
+}
+
+func (r *PostgresRepository) UpdateOrderStatus(ctx context.Context, actorID, restaurantID, orderID uuid.UUID, next string) (models.RestaurantOrder, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return models.RestaurantOrder{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var before restaurantOrderRow
+	if err := tx.GetContext(ctx, &before, `
+		SELECT o.order_id, o.status::text, o.total_amount::text, o.payment_method, o.created_at, o.updated_at
+		FROM orders o JOIN restaurants r ON r.restaurant_id = o.restaurant_id
+		WHERE o.order_id = $1 AND o.restaurant_id = $2 AND r.owner_id = $3
+		ORDER BY o.created_at DESC LIMIT 1 FOR UPDATE`, orderID, restaurantID, actorID); err != nil {
+		return models.RestaurantOrder{}, ownerOrderLookupError(err)
+	}
+	if !validOrderTransition(before.Status, next) {
+		return models.RestaurantOrder{}, fmt.Errorf("order cannot move from %s to %s", before.Status, next)
+	}
+	var after restaurantOrderRow
+	if err := tx.GetContext(ctx, &after, `
+		UPDATE orders SET status = $1::order_status, updated_by = $2, updated_at = NOW()
+		WHERE order_id = $3 AND restaurant_id = $4
+		RETURNING order_id, status::text, total_amount::text, payment_method, created_at, updated_at`, next, actorID, orderID, restaurantID); err != nil {
+		return models.RestaurantOrder{}, err
+	}
+	beforeJSON, err := json.Marshal(map[string]any{"status": before.Status})
+	if err != nil {
+		return models.RestaurantOrder{}, err
+	}
+	afterJSON, err := json.Marshal(map[string]any{"status": after.Status})
+	if err != nil {
+		return models.RestaurantOrder{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, before, after)
+		VALUES ($1, 'restaurant_owner', 'order_status_updated', 'order', $2, $3::jsonb, $4::jsonb)`, actorID, orderID.String(), beforeJSON, afterJSON); err != nil {
+		return models.RestaurantOrder{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.RestaurantOrder{}, err
+	}
+	return mapRestaurantOrder(after), nil
+}
+
+func mapRestaurantOrder(row restaurantOrderRow) models.RestaurantOrder {
+	return models.RestaurantOrder{OrderID: row.OrderID, Status: row.Status, TotalAmount: ownerMustMinor(row.TotalAmount), Currency: "INR", PaymentMethod: row.PaymentMethod, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+}
+
+func validOrderTransition(current, next string) bool {
+	switch current {
+	case "order_created", "confirmed":
+		return next == "accepted" || next == "rejected"
+	case "accepted":
+		return next == "preparing" || next == "rejected"
+	case "preparing":
+		return next == "ready_for_pickup"
+	default:
+		return false
+	}
+}
+
+func ownerOrderLookupError(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("order not found")
+	}
+	return err
 }
 
 type itemMutationRow struct {

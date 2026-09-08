@@ -23,4 +23,7 @@ func RegisterOwnerRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	restaurants.POST("/categories/:categoryId/items", h.CreateItem)
 	restaurants.PUT("/items/:itemId", h.UpdateItem)
 	restaurants.DELETE("/items/:itemId", h.DeleteItem)
+	orders := v1Protected.Group("/restaurants/:restaurantId", middleware.RequireRole(constants.RoleRestaurantOwner))
+	orders.GET("/orders", h.ListOrders)
+	orders.PATCH("/orders/:orderId/status", h.UpdateOrderStatus)
 }

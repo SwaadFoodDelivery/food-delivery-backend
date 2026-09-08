@@ -30,6 +30,8 @@ type OwnerRepository interface {
 	CreateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	UpdateItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, models.Item) (models.Item, error)
 	DeleteItem(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error
+	ListOrders(context.Context, uuid.UUID, uuid.UUID) ([]models.RestaurantOrder, error)
+	UpdateOrderStatus(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, string) (models.RestaurantOrder, error)
 }
 
 func DecodeCursor(raw string) (int, error) {
