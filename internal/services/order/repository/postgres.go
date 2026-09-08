@@ -131,7 +131,7 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 		RETURNING order_id, created_at, status::text, restaurant_id,
 		          (SELECT name FROM restaurants WHERE restaurant_id = orders.restaurant_id) AS restaurant_name,
 		          subtotal::text, taxes::text, delivery_fee::text, discount::text, total_amount::text,
-		          payment_method, address_id, instructions`, in.UserID, *cart.RestaurantID, in.AddressID,
+			  payment_method, address_id, instructions`, in.UserID, *lockedCart.RestaurantID, in.AddressID,
 		minorDecimal(quote.Subtotal), minorDecimal(quote.Taxes), minorDecimal(quote.DeliveryFee), minorDecimal(quote.Discount), minorDecimal(quote.TotalAmount), strings.TrimSpace(in.PaymentMethod), in.IdempotencyKey, strings.TrimSpace(in.Instructions)); err != nil {
 		return ordermodels.Order{}, false, err
 	}
