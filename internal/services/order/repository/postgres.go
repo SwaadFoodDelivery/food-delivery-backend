@@ -161,6 +161,11 @@ func (r *PostgresRepository) CancelForUser(ctx context.Context, userID, orderID 
 	if _, err := tx.ExecContext(ctx, `UPDATE deliveries SET next_transition_at = NULL, updated_by = $1, updated_at = NOW() WHERE order_id = $2 AND order_created_at = $3 AND status <> 'delivered'`, userID, orderID, row.CreatedAt); err != nil {
 		return ordermodels.HistoryItem{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO notifications (recipient_id, recipient_type, channels, title, body, status)
+		VALUES ($1, 'client', ARRAY['in_app'], 'Order cancelled', 'Your demo order was cancelled successfully.', 'queued')`, userID); err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
 	beforeJSON := fmt.Sprintf(`{"status":%q}`, row.Status)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, before, after) VALUES ($1, 'client', 'order_cancelled', 'order', $2, $3::jsonb, '{"status":"cancelled"}'::jsonb)`, userID, orderID.String(), beforeJSON); err != nil {
 		return ordermodels.HistoryItem{}, err
@@ -257,6 +262,11 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 			VALUES ($1, $2, $3, $4, $5::decimal, $6, $7::decimal, $8::jsonb)`, row.OrderID, row.CreatedAt, item.ItemID, item.Name, minorDecimal(item.UnitPrice), item.Quantity, minorDecimal(item.LineTotal), mustJSON(item.Customisations)); err != nil {
 			return ordermodels.Order{}, false, err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO notifications (recipient_id, recipient_type, channels, title, body, status)
+		VALUES ($1, 'client', ARRAY['in_app'], 'Order placed', 'Your Shamgarh demo order is now being prepared.', 'queued')`, in.UserID); err != nil {
+		return ordermodels.Order{}, false, err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE carts SET status = 'converted', restaurant_id = NULL, updated_at = NOW() WHERE cart_id = $1 AND user_id = $2 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())`, lockedCart.CartID, in.UserID)
 	if err != nil {
