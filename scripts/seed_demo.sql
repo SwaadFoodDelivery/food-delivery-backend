@@ -14,6 +14,17 @@ VALUES
  ('00000000-0000-4000-8000-000000000021', '9000000021', 'Swaad Demo Operations', 'demo-operations@invalid.swaad.test', TRUE, TRUE, 'restaurant_manager', TRUE)
 ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, account_status = 'active', is_deleted = FALSE;
 
+-- Repeatable notification fixtures for the operations and driver demo views.
+INSERT INTO notifications (notification_id, recipient_id, recipient_type, channels, title, body, status, is_read)
+SELECT '60000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000021', 'restaurant_manager', ARRAY['in_app'], 'Operations workspace ready', 'Mock delivery monitoring is online for Shamgarh.', 'delivered', FALSE
+WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE notification_id = '60000000-0000-4000-8000-000000000001');
+INSERT INTO notifications (notification_id, recipient_id, recipient_type, channels, title, body, status, is_read)
+SELECT '60000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000011', 'driver', ARRAY['in_app'], 'Demo shift available', 'Set your availability to receive a fictional Shamgarh assignment.', 'delivered', FALSE
+WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE notification_id = '60000000-0000-4000-8000-000000000011');
+INSERT INTO notifications (notification_id, recipient_id, recipient_type, channels, title, body, status, is_read)
+SELECT '60000000-0000-4000-8000-000000000012', '00000000-0000-4000-8000-000000000012', 'driver', ARRAY['in_app'], 'Mock provider active', 'Delivery progression is simulated and restart-safe for this demo.', 'delivered', FALSE
+WHERE NOT EXISTS (SELECT 1 FROM notifications WHERE notification_id = '60000000-0000-4000-8000-000000000012');
+
 -- Fictional development-only delivery partners. The encrypted bytea values are
 -- placeholders and must never be used as real identity or vehicle documents.
 INSERT INTO driver_profiles (user_id, driving_license_number_encrypted, vehicle_registration_encrypted, is_available, current_city)
