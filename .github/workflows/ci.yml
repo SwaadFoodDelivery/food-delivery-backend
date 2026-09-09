@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - codex/vert-001-catalog
     paths-ignore:
       - "**/.env"
       - "**/.env.*"
