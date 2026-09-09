@@ -17,6 +17,8 @@ import (
 type Service interface {
 	Quote(context.Context, QuoteInput) (ordermodels.Quote, error)
 	Place(context.Context, PlaceInput) (ordermodels.Order, bool, error)
+	List(context.Context, uuid.UUID, int) ([]ordermodels.HistoryItem, error)
+	History(context.Context, uuid.UUID, uuid.UUID) (ordermodels.History, error)
 }
 
 type DeliveryService interface {
@@ -113,6 +115,25 @@ func (s *service) Place(ctx context.Context, in PlaceInput) (ordermodels.Order, 
 		return ordermodels.Order{}, false, err
 	}
 	return out, replay, nil
+}
+
+func (s *service) List(ctx context.Context, userID uuid.UUID, limit int) ([]ordermodels.HistoryItem, error) {
+	historyRepo, ok := s.repo.(repository.HistoryRepository)
+	if !ok {
+		return nil, &ServiceError{StatusCode: 500, Code: "ORDER_HISTORY_UNAVAILABLE", Message: "order history is unavailable"}
+	}
+	if limit < 1 || limit > 50 {
+		return nil, &ServiceError{StatusCode: 400, Code: apperrors.CodeValidation, Message: "limit must be between 1 and 50"}
+	}
+	return historyRepo.ListForUser(ctx, userID, limit)
+}
+
+func (s *service) History(ctx context.Context, userID, orderID uuid.UUID) (ordermodels.History, error) {
+	historyRepo, ok := s.repo.(repository.HistoryRepository)
+	if !ok {
+		return ordermodels.History{}, &ServiceError{StatusCode: 500, Code: "ORDER_HISTORY_UNAVAILABLE", Message: "order history is unavailable"}
+	}
+	return historyRepo.GetHistory(ctx, userID, orderID)
 }
 
 func (s *service) ensureDelivery(ctx context.Context, order ordermodels.Order) error {

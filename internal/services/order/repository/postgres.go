@@ -69,6 +69,83 @@ type orderRow struct {
 	Instructions  sql.NullString `db:"instructions"`
 }
 
+type historyItemRow struct {
+	OrderID        uuid.UUID      `db:"order_id"`
+	Status         string         `db:"status"`
+	Restaurant     string         `db:"restaurant_name"`
+	TotalAmount    string         `db:"total_amount"`
+	PaymentMethod  string         `db:"payment_method"`
+	DeliveryStatus sql.NullString `db:"delivery_status"`
+	CreatedAt      time.Time      `db:"created_at"`
+}
+
+type statusEventRow struct {
+	FromStatus sql.NullString `db:"from_status"`
+	ToStatus   string         `db:"to_status"`
+	ChangedAt  time.Time      `db:"changed_at"`
+}
+
+func (r *PostgresRepository) ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]ordermodels.HistoryItem, error) {
+	rows := make([]historyItemRow, 0)
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT o.order_id, o.status::text, r.name AS restaurant_name, o.total_amount::text,
+		       o.payment_method, d.status::text AS delivery_status, o.created_at
+		FROM orders o
+		JOIN restaurants r ON r.restaurant_id = o.restaurant_id
+		LEFT JOIN deliveries d ON d.order_id = o.order_id AND d.order_created_at = o.created_at
+		WHERE o.user_id = $1
+		ORDER BY o.created_at DESC
+		LIMIT $2`, userID, limit); err != nil {
+		return nil, err
+	}
+	out := make([]ordermodels.HistoryItem, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ordermodels.HistoryItem{OrderID: row.OrderID, Status: row.Status, RestaurantName: row.Restaurant, TotalAmount: mustMinor(row.TotalAmount), Currency: "INR", PaymentMethod: row.PaymentMethod, DeliveryStatus: nullString(row.DeliveryStatus), CreatedAt: row.CreatedAt})
+	}
+	return out, nil
+}
+
+func (r *PostgresRepository) GetHistory(ctx context.Context, userID, orderID uuid.UUID) (ordermodels.History, error) {
+	var createdAt time.Time
+	if err := r.db.GetContext(ctx, &createdAt, `SELECT created_at FROM orders WHERE order_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1`, orderID, userID); errors.Is(err, sql.ErrNoRows) {
+		return ordermodels.History{}, ErrOrderNotFound
+	} else if err != nil {
+		return ordermodels.History{}, err
+	}
+	var orderRows []statusEventRow
+	if err := r.db.SelectContext(ctx, &orderRows, `
+		SELECT from_status::text, to_status::text, changed_at
+		FROM order_status_history
+		WHERE order_id = $1 AND order_created_at = $2
+		ORDER BY changed_at`, orderID, createdAt); err != nil {
+		return ordermodels.History{}, err
+	}
+	var deliveryID uuid.UUID
+	var deliveryRows []statusEventRow
+	if err := r.db.GetContext(ctx, &deliveryID, `SELECT delivery_id FROM deliveries WHERE order_id = $1 AND order_created_at = $2`, orderID, createdAt); err == nil {
+		if err := r.db.SelectContext(ctx, &deliveryRows, `
+			SELECT from_status::text, to_status::text, changed_at
+			FROM delivery_status_history WHERE delivery_id = $1 ORDER BY changed_at`, deliveryID); err != nil {
+			return ordermodels.History{}, err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return ordermodels.History{}, err
+	}
+	return ordermodels.History{OrderID: orderID, OrderStatus: mapEvents(orderRows), DeliveryStatus: mapEvents(deliveryRows)}, nil
+}
+
+func mapEvents(rows []statusEventRow) []ordermodels.StatusEvent {
+	out := make([]ordermodels.StatusEvent, 0, len(rows))
+	for _, row := range rows {
+		from := ""
+		if row.FromStatus.Valid {
+			from = row.FromStatus.String
+		}
+		out = append(out, ordermodels.StatusEvent{FromStatus: from, ToStatus: row.ToStatus, ChangedAt: row.ChangedAt})
+	}
+	return out
+}
+
 func (r *PostgresRepository) Quote(ctx context.Context, userID uuid.UUID, cart cartmodels.Cart, addressID uuid.UUID) (ordermodels.Quote, error) {
 	if len(cart.Items) == 0 || cart.RestaurantID == nil {
 		return ordermodels.Quote{}, ErrCartEmpty

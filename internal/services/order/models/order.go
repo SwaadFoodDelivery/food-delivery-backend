@@ -56,3 +56,26 @@ type Order struct {
 	EstimatedDelivery time.Time         `json:"estimated_delivery_at"`
 	Items             []cartmodels.Item `json:"items"`
 }
+
+type HistoryItem struct {
+	OrderID        uuid.UUID `json:"order_id"`
+	Status         string    `json:"status"`
+	RestaurantName string    `json:"restaurant_name"`
+	TotalAmount    int64     `json:"total_amount_minor"`
+	Currency       string    `json:"currency"`
+	PaymentMethod  string    `json:"payment_method"`
+	DeliveryStatus string    `json:"delivery_status,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type StatusEvent struct {
+	FromStatus string    `json:"from_status,omitempty"`
+	ToStatus   string    `json:"to_status"`
+	ChangedAt  time.Time `json:"changed_at"`
+}
+
+type History struct {
+	OrderID        uuid.UUID     `json:"order_id"`
+	OrderStatus    []StatusEvent `json:"order_status"`
+	DeliveryStatus []StatusEvent `json:"delivery_status"`
+}
