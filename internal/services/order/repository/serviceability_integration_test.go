@@ -136,6 +136,20 @@ func TestServiceabilityPostGIS(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE restaurants SET is_open = TRUE WHERE restaurant_id = $1`, restaurantID); err != nil {
 		t.Fatalf("restore restaurant fixture: %v", err)
 	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE restaurants SET status = 'inactive' WHERE restaurant_id = $1`, restaurantID); err != nil {
+		t.Fatalf("deactivate restaurant fixture: %v", err)
+	}
+	unavailable, err := repo.CheckServiceability(ctx, userID, addressIDs[0], restaurantID)
+	if err != nil {
+		t.Fatalf("inactive decision: %v", err)
+	}
+	if unavailable.Serviceable || unavailable.ReasonCode != "restaurant_unavailable" {
+		t.Fatalf("inactive decision = %#v", unavailable)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE restaurants SET status = 'active' WHERE restaurant_id = $1`, restaurantID); err != nil {
+		t.Fatalf("restore restaurant status fixture: %v", err)
+	}
 }
 
 func cleanupAddresses(t *testing.T, ctx context.Context, db *sqlx.DB, ids []uuid.UUID) {
