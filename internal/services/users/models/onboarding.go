@@ -70,9 +70,9 @@ type OnboardingReviewItem struct {
 }
 
 type ReviewOnboardingInput struct {
-	ActorID        string
-	OnboardingID   string
-	Status         string
+	ActorID         string
+	OnboardingID    string
+	Status          string
 	RejectionReason string
 }
 
