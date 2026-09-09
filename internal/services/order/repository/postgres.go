@@ -26,7 +26,7 @@ func (r *PostgresRepository) FindByIdempotency(ctx context.Context, userID uuid.
 	err := r.db.GetContext(ctx, &row, `
 		SELECT o.order_id, o.created_at, o.status::text, o.restaurant_id, r.name AS restaurant_name,
 		       o.subtotal::text, o.taxes::text, o.delivery_fee::text, o.discount::text,
-		       o.total_amount::text, o.payment_method, o.address_id, o.instructions
+		       o.total_amount::text, o.payment_method, o.address_id, o.instructions, r.delivery_time_min
 		FROM orders o JOIN restaurants r ON r.restaurant_id = o.restaurant_id
 		WHERE o.user_id = $1 AND o.idempotency_key = $2
 		ORDER BY o.created_at DESC LIMIT 1`, userID, key)
@@ -55,19 +55,20 @@ type itemRow struct {
 }
 
 type orderRow struct {
-	OrderID       uuid.UUID      `db:"order_id"`
-	CreatedAt     time.Time      `db:"created_at"`
-	Status        string         `db:"status"`
-	RestaurantID  uuid.UUID      `db:"restaurant_id"`
-	Restaurant    string         `db:"restaurant_name"`
-	Subtotal      string         `db:"subtotal"`
-	Taxes         string         `db:"taxes"`
-	DeliveryFee   string         `db:"delivery_fee"`
-	Discount      string         `db:"discount"`
-	TotalAmount   string         `db:"total_amount"`
-	PaymentMethod string         `db:"payment_method"`
-	AddressID     uuid.UUID      `db:"address_id"`
-	Instructions  sql.NullString `db:"instructions"`
+	OrderID         uuid.UUID      `db:"order_id"`
+	CreatedAt       time.Time      `db:"created_at"`
+	Status          string         `db:"status"`
+	RestaurantID    uuid.UUID      `db:"restaurant_id"`
+	Restaurant      string         `db:"restaurant_name"`
+	Subtotal        string         `db:"subtotal"`
+	Taxes           string         `db:"taxes"`
+	DeliveryFee     string         `db:"delivery_fee"`
+	Discount        string         `db:"discount"`
+	TotalAmount     string         `db:"total_amount"`
+	PaymentMethod   string         `db:"payment_method"`
+	AddressID       uuid.UUID      `db:"address_id"`
+	Instructions    sql.NullString `db:"instructions"`
+	DeliveryTimeMin int            `db:"delivery_time_min"`
 }
 
 type historyItemRow struct {
@@ -285,7 +286,7 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 	if err := tx.GetContext(ctx, &existing, `
 		SELECT o.order_id, o.created_at, o.status::text, o.restaurant_id, r.name AS restaurant_name,
 		       o.subtotal::text, o.taxes::text, o.delivery_fee::text, o.discount::text,
-		       o.total_amount::text, o.payment_method, o.address_id, o.instructions
+		       o.total_amount::text, o.payment_method, o.address_id, o.instructions, r.delivery_time_min
 		FROM orders o JOIN restaurants r ON r.restaurant_id = o.restaurant_id
 		WHERE o.user_id = $1 AND o.idempotency_key = $2
 		ORDER BY o.created_at DESC LIMIT 1`, in.UserID, in.IdempotencyKey); err == nil {
@@ -316,10 +317,11 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 	if err := tx.GetContext(ctx, &row, `
 		INSERT INTO orders (user_id, restaurant_id, address_id, status, subtotal, taxes, delivery_fee, discount, total_amount, payment_method, idempotency_key, instructions)
 		VALUES ($1, $2, $3, 'order_created', $4::decimal, $5::decimal, $6::decimal, $7::decimal, $8::decimal, $9, $10, $11)
-		RETURNING order_id, created_at, status::text, restaurant_id,
-		          (SELECT name FROM restaurants WHERE restaurant_id = orders.restaurant_id) AS restaurant_name,
-		          subtotal::text, taxes::text, delivery_fee::text, discount::text, total_amount::text,
-			  payment_method, address_id, instructions`, in.UserID, *lockedCart.RestaurantID, in.AddressID,
+			RETURNING order_id, created_at, status::text, restaurant_id,
+			          (SELECT name FROM restaurants WHERE restaurant_id = orders.restaurant_id) AS restaurant_name,
+			          subtotal::text, taxes::text, delivery_fee::text, discount::text, total_amount::text,
+			  payment_method, address_id, instructions,
+			          (SELECT delivery_time_min FROM restaurants WHERE restaurant_id = orders.restaurant_id) AS delivery_time_min`, in.UserID, *lockedCart.RestaurantID, in.AddressID,
 		minorDecimal(quote.Subtotal), minorDecimal(quote.Taxes), minorDecimal(quote.DeliveryFee), minorDecimal(quote.Discount), minorDecimal(quote.TotalAmount), strings.TrimSpace(in.PaymentMethod), in.IdempotencyKey, strings.TrimSpace(in.Instructions)); err != nil {
 		return ordermodels.Order{}, false, err
 	}
@@ -536,7 +538,11 @@ func decimalToMinor(raw string) (int64, error) {
 }
 
 func (r *PostgresRepository) mapOrder(ctx context.Context, tx *sqlx.Tx, row orderRow) (ordermodels.Order, error) {
-	out := ordermodels.Order{OrderID: row.OrderID, Status: row.Status, RestaurantID: row.RestaurantID, RestaurantName: row.Restaurant, Subtotal: mustMinor(row.Subtotal), Taxes: mustMinor(row.Taxes), DeliveryFee: mustMinor(row.DeliveryFee), Discount: mustMinor(row.Discount), TotalAmount: mustMinor(row.TotalAmount), Currency: "INR", PaymentMethod: row.PaymentMethod, AddressID: row.AddressID, Instructions: nullString(row.Instructions), CreatedAt: row.CreatedAt, EstimatedDelivery: row.CreatedAt.Add(ordermodels.EstimatedDeliveryMin * time.Minute), Items: []cartmodels.Item{}}
+	etaMinutes := row.DeliveryTimeMin
+	if etaMinutes <= 0 {
+		etaMinutes = ordermodels.EstimatedDeliveryMin
+	}
+	out := ordermodels.Order{OrderID: row.OrderID, Status: row.Status, RestaurantID: row.RestaurantID, RestaurantName: row.Restaurant, Subtotal: mustMinor(row.Subtotal), Taxes: mustMinor(row.Taxes), DeliveryFee: mustMinor(row.DeliveryFee), Discount: mustMinor(row.Discount), TotalAmount: mustMinor(row.TotalAmount), Currency: "INR", PaymentMethod: row.PaymentMethod, AddressID: row.AddressID, Instructions: nullString(row.Instructions), CreatedAt: row.CreatedAt, EstimatedDelivery: row.CreatedAt.Add(time.Duration(etaMinutes) * time.Minute), Items: []cartmodels.Item{}}
 	var rows []struct {
 		ItemID         uuid.UUID       `db:"item_id"`
 		Name           string          `db:"item_name_snapshot"`
