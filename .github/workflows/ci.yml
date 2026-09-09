@@ -54,3 +54,34 @@ jobs:
 
       - name: Docker Build
         run: docker build -t food-delivery-backend:ci .
+
+  migration-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:15-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: food_delivery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d food_delivery"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run migration and seed smoke test
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
+        run: go test ./infra/postgres -run TestMigrationsAndDemoSeed -count=1 -v
