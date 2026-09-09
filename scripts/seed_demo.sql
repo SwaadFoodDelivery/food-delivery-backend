@@ -10,7 +10,8 @@ VALUES
  ('00000000-0000-4000-8000-000000000004', '9000000004', 'Swaad Demo Owner 4', 'demo-owner-4@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
  ('00000000-0000-4000-8000-000000000005', '9000000005', 'Swaad Demo Owner 5', 'demo-owner-5@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
  ('00000000-0000-4000-8000-000000000011', '9000000011', 'Swaad Demo Driver 1', 'demo-driver-1@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE),
- ('00000000-0000-4000-8000-000000000012', '9000000012', 'Swaad Demo Driver 2', 'demo-driver-2@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE)
+ ('00000000-0000-4000-8000-000000000012', '9000000012', 'Swaad Demo Driver 2', 'demo-driver-2@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE),
+ ('00000000-0000-4000-8000-000000000021', '9000000021', 'Swaad Demo Operations', 'demo-operations@invalid.swaad.test', TRUE, TRUE, 'restaurant_manager', TRUE)
 ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, account_status = 'active', is_deleted = FALSE;
 
 -- Fictional development-only delivery partners. The encrypted bytea values are

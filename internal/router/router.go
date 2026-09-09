@@ -8,6 +8,7 @@ import (
 	cartroutes "food-delivery-backend/internal/services/cart/api"
 	commonroutes "food-delivery-backend/internal/services/common/api/routes"
 	deliveryroutes "food-delivery-backend/internal/services/delivery/api"
+	operationsroutes "food-delivery-backend/internal/services/operations/api"
 	orderroutes "food-delivery-backend/internal/services/order/api"
 	paymentroutes "food-delivery-backend/internal/services/payment/api"
 	restaurantroutes "food-delivery-backend/internal/services/restaurant/api"
@@ -32,6 +33,7 @@ func NewRouter(deps *app.Container) *gin.Engine {
 	commonroutes.RegisterRoutes(public, protected, deps)
 	cartroutes.RegisterRoutes(protected, deps)
 	orderroutes.RegisterRoutes(protected, deps)
+	operationsroutes.RegisterRoutes(protected, deps)
 	deliveryroutes.RegisterRoutes(protected, deps)
 	paymentroutes.RegisterRoutes(protected, deps)
 	restaurantroutes.RegisterRoutes(public, deps)
