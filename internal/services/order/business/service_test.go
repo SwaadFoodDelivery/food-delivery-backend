@@ -37,6 +37,9 @@ func (f fakeOrderRepository) FindByIdempotency(context.Context, uuid.UUID, strin
 func (f fakeOrderRepository) Place(context.Context, ordermodels.PlaceInput, cartmodels.Cart, ordermodels.Quote) (ordermodels.Order, bool, error) {
 	return ordermodels.Order{}, false, nil
 }
+func (f fakeOrderRepository) CheckServiceability(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (ordermodels.Serviceability, error) {
+	return ordermodels.Serviceability{}, nil
+}
 
 func TestPlaceReplaysBeforeReadingConvertedCart(t *testing.T) {
 	carts := &fakeCartService{}

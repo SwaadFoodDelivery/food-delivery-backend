@@ -17,6 +17,7 @@ import (
 type Service interface {
 	Quote(context.Context, QuoteInput) (ordermodels.Quote, error)
 	Place(context.Context, PlaceInput) (ordermodels.Order, bool, error)
+	Serviceability(context.Context, ServiceabilityInput) (ordermodels.Serviceability, error)
 	List(context.Context, uuid.UUID, int) ([]ordermodels.HistoryItem, error)
 	History(context.Context, uuid.UUID, uuid.UUID) (ordermodels.History, error)
 }
@@ -38,6 +39,12 @@ type PlaceInput struct {
 	PaymentMethod  string
 	Instructions   string
 	IdempotencyKey string
+}
+
+type ServiceabilityInput struct {
+	UserID       string
+	RestaurantID string
+	AddressID    string
 }
 
 type ServiceError struct {
@@ -74,6 +81,29 @@ func (s *service) Quote(ctx context.Context, in QuoteInput) (ordermodels.Quote, 
 	out, err := s.repo.Quote(ctx, userID, cart, addressID)
 	if err != nil {
 		return ordermodels.Quote{}, mapRepositoryError(err)
+	}
+	return out, nil
+}
+
+func (s *service) Serviceability(ctx context.Context, in ServiceabilityInput) (ordermodels.Serviceability, error) {
+	userID, err := uuid.Parse(strings.TrimSpace(in.UserID))
+	if err != nil {
+		return ordermodels.Serviceability{}, &ServiceError{StatusCode: 401, Code: apperrors.CodeInvalidToken, Message: "invalid user identity"}
+	}
+	restaurantID, err := uuid.Parse(strings.TrimSpace(in.RestaurantID))
+	if err != nil {
+		return ordermodels.Serviceability{}, &ServiceError{StatusCode: 400, Code: apperrors.CodeValidation, Message: "restaurant_id must be a UUID"}
+	}
+	addressID, err := uuid.Parse(strings.TrimSpace(in.AddressID))
+	if err != nil {
+		return ordermodels.Serviceability{}, &ServiceError{StatusCode: 400, Code: apperrors.CodeValidation, Message: "address_id must be a UUID"}
+	}
+	out, err := s.repo.CheckServiceability(ctx, userID, addressID, restaurantID)
+	if errors.Is(err, repository.ErrAddressNotFound) {
+		return ordermodels.Serviceability{}, &ServiceError{StatusCode: 404, Code: "ADDRESS_NOT_FOUND", Message: "address not found"}
+	}
+	if err != nil {
+		return ordermodels.Serviceability{}, err
 	}
 	return out, nil
 }
@@ -178,6 +208,8 @@ func mapRepositoryError(err error) error {
 		return &ServiceError{StatusCode: 409, Code: "ITEM_UNAVAILABLE", Message: "a menu item is unavailable"}
 	case errors.Is(err, repository.ErrAddressNotFound):
 		return &ServiceError{StatusCode: 404, Code: "ADDRESS_NOT_FOUND", Message: "address not found"}
+	case errors.Is(err, repository.ErrRestaurantNotFound):
+		return &ServiceError{StatusCode: 404, Code: "RESTAURANT_NOT_FOUND", Message: "restaurant not found"}
 	case errors.Is(err, repository.ErrNotServiceable):
 		return &ServiceError{StatusCode: 422, Code: "ADDRESS_NOT_SERVICEABLE", Message: "address is outside the restaurant service area"}
 	case errors.Is(err, repository.ErrInvalidPayment):

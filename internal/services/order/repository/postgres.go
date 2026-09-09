@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -194,13 +195,75 @@ func (r *PostgresRepository) Quote(ctx context.Context, userID uuid.UUID, cart c
 	if len(cart.Items) == 0 || cart.RestaurantID == nil {
 		return ordermodels.Quote{}, ErrCartEmpty
 	}
-	if err := r.validateAddress(ctx, userID, addressID, *cart.RestaurantID); err != nil {
+	serviceability, err := r.CheckServiceability(ctx, userID, addressID, *cart.RestaurantID)
+	if err != nil {
 		return ordermodels.Quote{}, err
+	}
+	if !serviceability.Serviceable {
+		return ordermodels.Quote{}, ErrNotServiceable
 	}
 	if err := r.validateItems(ctx, *cart.RestaurantID, cart.Items); err != nil {
 		return ordermodels.Quote{}, err
 	}
-	return quoteFor(cart.Subtotal, time.Now().UTC()), nil
+	return quoteFor(cart.Subtotal, serviceability, time.Now().UTC()), nil
+}
+
+type serviceabilityRow struct {
+	DistanceKM      float64 `db:"distance_km"`
+	WithinRadius    bool    `db:"within_radius"`
+	ServiceRadiusKM float64 `db:"service_radius_km"`
+	IsOpen          bool    `db:"is_open"`
+	Status          string  `db:"status"`
+	DeliveryTimeMin int     `db:"delivery_time_min"`
+}
+
+func (r *PostgresRepository) CheckServiceability(ctx context.Context, userID, addressID, restaurantID uuid.UUID) (ordermodels.Serviceability, error) {
+	return r.checkServiceabilityWithQueryer(ctx, r.db, userID, addressID, restaurantID)
+}
+
+func (r *PostgresRepository) checkServiceabilityWithQueryer(ctx context.Context, queryer sqlx.QueryerContext, userID, addressID, restaurantID uuid.UUID) (ordermodels.Serviceability, error) {
+	var address addressRow
+	if err := sqlx.GetContext(ctx, queryer, &address, `SELECT address_id, latitude, longitude FROM addresses WHERE address_id = $1 AND user_id = $2 AND is_deleted = FALSE`, addressID, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ordermodels.Serviceability{}, ErrAddressNotFound
+		}
+		return ordermodels.Serviceability{}, err
+	}
+	if !address.Latitude.Valid || !address.Longitude.Valid {
+		return ordermodels.Serviceability{Serviceable: false, ReasonCode: "missing_coordinates", Reason: "Add a map location to this address before ordering.", Currency: "INR"}, nil
+	}
+	var row serviceabilityRow
+	if err := sqlx.GetContext(ctx, queryer, &row, `
+		SELECT ST_Distance(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) / 1000.0 AS distance_km,
+		       ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) AS within_radius,
+		       r.service_radius_km, r.is_open, r.status::text, r.delivery_time_min
+		FROM restaurants r WHERE r.restaurant_id = $3
+	`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ordermodels.Serviceability{}, ErrRestaurantNotFound
+		}
+		return ordermodels.Serviceability{}, err
+	}
+	decision := ordermodels.Serviceability{DistanceKM: math.Round(row.DistanceKM*100) / 100, ServiceRadiusKM: row.ServiceRadiusKM, EstimatedDeliveryMin: row.DeliveryTimeMin, Currency: "INR"}
+	if decision.EstimatedDeliveryMin <= 0 {
+		decision.EstimatedDeliveryMin = ordermodels.EstimatedDeliveryMin
+	}
+	if row.Status != "active" {
+		decision.ReasonCode, decision.Reason = "restaurant_unavailable", "This restaurant is not accepting orders right now."
+		return decision, nil
+	}
+	if !row.IsOpen {
+		decision.ReasonCode, decision.Reason = "restaurant_closed", "This restaurant is currently closed."
+		return decision, nil
+	}
+	if !row.WithinRadius {
+		decision.ReasonCode, decision.Reason = "outside_delivery_radius", "This address is outside the restaurant's delivery area."
+		return decision, nil
+	}
+	decision.Serviceable = true
+	decision.ReasonCode, decision.Reason = "serviceable", "This address is serviceable."
+	decision.DeliveryFee = deliveryFeeForDistance(decision.DistanceKM)
+	return decision, nil
 }
 
 func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInput, cart cartmodels.Cart, quote ordermodels.Quote) (ordermodels.Order, bool, error) {
@@ -238,10 +301,14 @@ func (r *PostgresRepository) Place(ctx context.Context, in ordermodels.PlaceInpu
 	if len(lockedCart.Items) == 0 || lockedCart.RestaurantID == nil {
 		return ordermodels.Order{}, false, ErrCartEmpty
 	}
-	quote = quoteFor(lockedCart.Subtotal, time.Now().UTC())
-	if err := r.validateAddressTx(ctx, tx, in.UserID, in.AddressID, *lockedCart.RestaurantID); err != nil {
+	serviceability, err := r.checkServiceabilityWithQueryer(ctx, tx, in.UserID, in.AddressID, *lockedCart.RestaurantID)
+	if err != nil {
 		return ordermodels.Order{}, false, err
 	}
+	if !serviceability.Serviceable {
+		return ordermodels.Order{}, false, ErrNotServiceable
+	}
+	quote = quoteFor(lockedCart.Subtotal, serviceability, time.Now().UTC())
 	if err := r.validateItemsTx(ctx, tx, *lockedCart.RestaurantID, lockedCart.Items); err != nil {
 		return ordermodels.Order{}, false, err
 	}
@@ -357,42 +424,22 @@ func mustJSON(value []string) string {
 }
 
 func (r *PostgresRepository) validateAddress(ctx context.Context, userID, addressID, restaurantID uuid.UUID) error {
-	var address addressRow
-	if err := r.db.GetContext(ctx, &address, `SELECT address_id, latitude, longitude FROM addresses WHERE address_id = $1 AND user_id = $2 AND is_deleted = FALSE`, addressID, userID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAddressNotFound
-		}
+	decision, err := r.CheckServiceability(ctx, userID, addressID, restaurantID)
+	if err != nil {
 		return err
 	}
-	if !address.Latitude.Valid || !address.Longitude.Valid {
-		return ErrNotServiceable
-	}
-	var serviceable bool
-	if err := r.db.GetContext(ctx, &serviceable, `SELECT ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) FROM restaurants r WHERE r.restaurant_id = $3 AND r.status = 'active'`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
-		return err
-	}
-	if !serviceable {
+	if !decision.Serviceable {
 		return ErrNotServiceable
 	}
 	return nil
 }
 
 func (r *PostgresRepository) validateAddressTx(ctx context.Context, tx *sqlx.Tx, userID, addressID, restaurantID uuid.UUID) error {
-	var address addressRow
-	if err := tx.GetContext(ctx, &address, `SELECT address_id, latitude, longitude FROM addresses WHERE address_id = $1 AND user_id = $2 AND is_deleted = FALSE FOR SHARE`, addressID, userID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAddressNotFound
-		}
+	decision, err := r.checkServiceabilityWithQueryer(ctx, tx, userID, addressID, restaurantID)
+	if err != nil {
 		return err
 	}
-	if !address.Latitude.Valid || !address.Longitude.Valid {
-		return ErrNotServiceable
-	}
-	var serviceable bool
-	if err := tx.GetContext(ctx, &serviceable, `SELECT ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) FROM restaurants r WHERE r.restaurant_id = $3 AND r.status = 'active'`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
-		return err
-	}
-	if !serviceable {
+	if !decision.Serviceable {
 		return ErrNotServiceable
 	}
 	return nil
@@ -444,9 +491,20 @@ func (r *PostgresRepository) validateItemsTx(ctx context.Context, tx *sqlx.Tx, r
 	return nil
 }
 
-func quoteFor(subtotal int64, now time.Time) ordermodels.Quote {
+func quoteFor(subtotal int64, serviceability ordermodels.Serviceability, now time.Time) ordermodels.Quote {
 	taxes := subtotal * ordermodels.TaxRatePercent / 100
-	return ordermodels.Quote{Subtotal: subtotal, Taxes: taxes, DeliveryFee: ordermodels.DeliveryFeeMinor, Discount: 0, TotalAmount: subtotal + taxes + ordermodels.DeliveryFeeMinor, Currency: "INR", EstimatedDeliveryAt: now.Add(ordermodels.EstimatedDeliveryMin * time.Minute)}
+	return ordermodels.Quote{Subtotal: subtotal, Taxes: taxes, DeliveryFee: serviceability.DeliveryFee, Discount: 0, TotalAmount: subtotal + taxes + serviceability.DeliveryFee, Currency: "INR", EstimatedDeliveryAt: now.Add(time.Duration(serviceability.EstimatedDeliveryMin) * time.Minute), Serviceability: serviceability}
+}
+
+func deliveryFeeForDistance(distanceKM float64) int64 {
+	fee := ordermodels.DeliveryFeeMinor
+	if distanceKM > 3 {
+		fee += int64(math.Ceil(distanceKM-3)) * 500
+	}
+	if fee > 8000 {
+		return 8000
+	}
+	return fee
 }
 
 func minorDecimal(value int64) string { return fmt.Sprintf("%d.%02d", value/100, value%100) }

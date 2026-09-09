@@ -20,13 +20,25 @@ type QuoteInput struct {
 }
 
 type Quote struct {
-	Subtotal            int64     `json:"subtotal_minor"`
-	Taxes               int64     `json:"taxes_minor"`
-	DeliveryFee         int64     `json:"delivery_fee_minor"`
-	Discount            int64     `json:"discount_minor"`
-	TotalAmount         int64     `json:"total_amount_minor"`
-	Currency            string    `json:"currency"`
-	EstimatedDeliveryAt time.Time `json:"estimated_delivery_at"`
+	Subtotal            int64          `json:"subtotal_minor"`
+	Taxes               int64          `json:"taxes_minor"`
+	DeliveryFee         int64          `json:"delivery_fee_minor"`
+	Discount            int64          `json:"discount_minor"`
+	TotalAmount         int64          `json:"total_amount_minor"`
+	Currency            string         `json:"currency"`
+	EstimatedDeliveryAt time.Time      `json:"estimated_delivery_at"`
+	Serviceability      Serviceability `json:"serviceability"`
+}
+
+type Serviceability struct {
+	Serviceable          bool    `json:"serviceable"`
+	ReasonCode           string  `json:"reason_code"`
+	Reason               string  `json:"reason"`
+	DistanceKM           float64 `json:"distance_km"`
+	ServiceRadiusKM      float64 `json:"service_radius_km"`
+	DeliveryFee          int64   `json:"delivery_fee_minor"`
+	EstimatedDeliveryMin int     `json:"estimated_delivery_min"`
+	Currency             string  `json:"currency"`
 }
 
 type PlaceInput struct {
