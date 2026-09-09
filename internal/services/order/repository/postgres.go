@@ -368,7 +368,7 @@ func (r *PostgresRepository) validateAddress(ctx context.Context, userID, addres
 		return ErrNotServiceable
 	}
 	var serviceable bool
-	if err := r.db.GetContext(ctx, &serviceable, `SELECT ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) FROM restaurants r WHERE r.restaurant_id = $3 AND r.status = 'active'`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
+	if err := r.db.GetContext(ctx, &serviceable, `SELECT COALESCE((SELECT ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) FROM restaurants r WHERE r.restaurant_id = $3 AND r.status = 'active' AND r.is_open = TRUE), FALSE)`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
 		return err
 	}
 	if !serviceable {
@@ -389,7 +389,7 @@ func (r *PostgresRepository) validateAddressTx(ctx context.Context, tx *sqlx.Tx,
 		return ErrNotServiceable
 	}
 	var serviceable bool
-	if err := tx.GetContext(ctx, &serviceable, `SELECT ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) FROM restaurants r WHERE r.restaurant_id = $3 AND r.status = 'active'`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
+	if err := tx.GetContext(ctx, &serviceable, `SELECT COALESCE((SELECT ST_DWithin(r.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, r.service_radius_km * 1000) FROM restaurants r WHERE r.restaurant_id = $3 AND r.status = 'active' AND r.is_open = TRUE), FALSE)`, address.Longitude.Float64, address.Latitude.Float64, restaurantID); err != nil {
 		return err
 	}
 	if !serviceable {
