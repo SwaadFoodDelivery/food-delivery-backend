@@ -44,3 +44,15 @@ type Driver struct {
 	ActiveOrderID  *uuid.UUID `json:"active_order_id,omitempty"`
 	DeliveryStatus string     `json:"delivery_status,omitempty"`
 }
+
+type AuditEvent struct {
+	AuditID    int64     `json:"audit_id"`
+	OccurredAt time.Time `json:"occurred_at"`
+	ActorID    string    `json:"actor_id,omitempty"`
+	ActorRole  string    `json:"actor_role,omitempty"`
+	Action     string    `json:"action"`
+	EntityType string    `json:"entity_type"`
+	EntityID   string    `json:"entity_id"`
+	Before     string    `json:"before,omitempty"`
+	After      string    `json:"after,omitempty"`
+}

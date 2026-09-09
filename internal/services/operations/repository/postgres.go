@@ -121,6 +121,21 @@ func (r *PostgresRepository) GetOverview(ctx context.Context, status string) (mo
 	}, nil
 }
 
+func (r *PostgresRepository) ListAuditEvents(ctx context.Context, action, entityType string, limit int) ([]models.AuditEvent, error) {
+	items := make([]models.AuditEvent, 0)
+	err := r.db.SelectContext(ctx, &items, `
+		SELECT audit_id, occurred_at, COALESCE(actor_id::text, '') AS actor_id,
+		       COALESCE(actor_role::text, '') AS actor_role, action, entity_type, entity_id,
+		       COALESCE(before::text, '') AS before, COALESCE(after::text, '') AS after
+		FROM audit_logs
+		WHERE ($1 = '' OR action = $1)
+		  AND ($2 = '' OR entity_type = $2)
+		ORDER BY occurred_at DESC, audit_id DESC
+		LIMIT $3
+	`, action, entityType, limit)
+	return items, err
+}
+
 func (r *PostgresRepository) CancelOrder(ctx context.Context, actorID, orderID uuid.UUID) (models.Order, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -219,4 +234,11 @@ func ValidateStatus(status string) error {
 	default:
 		return fmt.Errorf("unsupported order status %q", status)
 	}
+}
+
+func ValidateAuditLimit(limit int) error {
+	if limit < 1 || limit > 100 {
+		return fmt.Errorf("limit must be between 1 and 100")
+	}
+	return nil
 }

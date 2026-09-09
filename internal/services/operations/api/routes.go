@@ -13,5 +13,6 @@ func RegisterRoutes(protected *gin.RouterGroup, deps *app.Container) {
 	h := NewHandler(business.NewService(repository.NewPostgresRepository(deps.DB)))
 	operations := protected.Group("/operations", middleware.RequireRole(constants.RoleRestaurantManager))
 	operations.GET("/overview", h.Overview)
+	operations.GET("/audit", h.Audit)
 	operations.PATCH("/orders/:orderId/cancel", h.CancelOrder)
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"food-delivery-backend/internal/constants"
@@ -56,6 +57,24 @@ func (h *Handler) CancelOrder(c *gin.Context) {
 		return
 	}
 	response.Success(c, http.StatusOK, out)
+}
+
+func (h *Handler) Audit(c *gin.Context) {
+	limit := 50
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "INVALID_AUDIT_LIMIT", "limit must be a number between 1 and 100", []string{})
+			return
+		}
+		limit = parsed
+	}
+	items, err := h.svc.ListAuditEvents(c.Request.Context(), c.Query("action"), c.Query("entity_type"), limit)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_AUDIT_LIMIT", err.Error(), []string{})
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"items": items})
 }
 
 func valueString(value any) string {

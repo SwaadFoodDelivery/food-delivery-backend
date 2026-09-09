@@ -16,4 +16,5 @@ var (
 type Repository interface {
 	GetOverview(context.Context, string) (models.Overview, error)
 	CancelOrder(context.Context, uuid.UUID, uuid.UUID) (models.Order, error)
+	ListAuditEvents(context.Context, string, string, int) ([]models.AuditEvent, error)
 }

@@ -24,3 +24,16 @@ func TestValidateStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateAuditLimit(t *testing.T) {
+	for _, limit := range []int{1, 50, 100} {
+		if err := ValidateAuditLimit(limit); err != nil {
+			t.Fatalf("ValidateAuditLimit(%d) error = %v", limit, err)
+		}
+	}
+	for _, limit := range []int{0, 101} {
+		if err := ValidateAuditLimit(limit); err == nil {
+			t.Fatalf("ValidateAuditLimit(%d) expected error", limit)
+		}
+	}
+}
