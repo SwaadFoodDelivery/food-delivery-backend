@@ -132,6 +132,16 @@ func (r *PostgresRepository) Complete(ctx context.Context, paymentID uuid.UUID, 
 	if err := tx.GetContext(ctx, &row, paymentSelect+` WHERE p.payment_id = $1`, paymentID); err != nil {
 		return models.Payment{}, err
 	}
+	title, body := "Payment confirmed", "Your mock payment was confirmed for the demo order."
+	if status == models.StatusFailed {
+		title, body = "Payment needs attention", "Your mock payment was declined. You can retry the demo payment."
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO notifications (recipient_id, recipient_type, channels, title, body, status)
+		SELECT o.user_id, 'client', ARRAY['in_app'], $1, $2, 'queued'
+		FROM orders o WHERE o.order_id = $3`, title, body, row.OrderID); err != nil {
+		return models.Payment{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return models.Payment{}, err
 	}
