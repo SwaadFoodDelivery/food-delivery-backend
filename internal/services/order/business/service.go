@@ -102,6 +102,9 @@ func (s *service) Serviceability(ctx context.Context, in ServiceabilityInput) (o
 	if errors.Is(err, repository.ErrAddressNotFound) {
 		return ordermodels.Serviceability{}, &ServiceError{StatusCode: 404, Code: "ADDRESS_NOT_FOUND", Message: "address not found"}
 	}
+	if errors.Is(err, repository.ErrRestaurantNotFound) {
+		return ordermodels.Serviceability{}, &ServiceError{StatusCode: 404, Code: "RESTAURANT_NOT_FOUND", Message: "restaurant not found"}
+	}
 	if err != nil {
 		return ordermodels.Serviceability{}, err
 	}
