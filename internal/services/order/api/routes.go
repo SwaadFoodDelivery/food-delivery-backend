@@ -20,4 +20,5 @@ func RegisterRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	orders.POST("", h.Place)
 	orders.GET("", h.List)
 	orders.GET("/:orderId/history", h.History)
+	orders.PATCH("/:orderId/cancel", h.Cancel)
 }

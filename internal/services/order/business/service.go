@@ -136,6 +136,14 @@ func (s *service) History(ctx context.Context, userID, orderID uuid.UUID) (order
 	return historyRepo.GetHistory(ctx, userID, orderID)
 }
 
+func (s *service) Cancel(ctx context.Context, userID, orderID uuid.UUID) (ordermodels.HistoryItem, error) {
+	historyRepo, ok := s.repo.(repository.HistoryRepository)
+	if !ok {
+		return ordermodels.HistoryItem{}, &ServiceError{StatusCode: 500, Code: "ORDER_CANCELLATION_UNAVAILABLE", Message: "order cancellation is unavailable"}
+	}
+	return historyRepo.CancelForUser(ctx, userID, orderID)
+}
+
 func (s *service) ensureDelivery(ctx context.Context, order ordermodels.Order) error {
 	if s.delivery == nil {
 		return nil

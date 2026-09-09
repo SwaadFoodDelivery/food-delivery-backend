@@ -126,6 +126,40 @@ func (h *Handler) History(c *gin.Context) {
 	response.Success(c, http.StatusOK, out)
 }
 
+func (h *Handler) Cancel(c *gin.Context) {
+	uid, err := uuid.Parse(userID(c))
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, apperrors.CodeInvalidToken, "invalid user identity", []string{})
+		return
+	}
+	orderID, err := uuid.Parse(strings.TrimSpace(c.Param("orderId")))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "orderId must be a UUID", []string{})
+		return
+	}
+	history, ok := h.svc.(interface {
+		Cancel(context.Context, uuid.UUID, uuid.UUID) (ordermodels.HistoryItem, error)
+	})
+	if !ok {
+		response.Error(c, http.StatusInternalServerError, "ORDER_CANCELLATION_UNAVAILABLE", "order cancellation is unavailable", []string{})
+		return
+	}
+	out, err := history.Cancel(c.Request.Context(), uid, orderID)
+	if errors.Is(err, repository.ErrOrderNotFound) {
+		response.Error(c, http.StatusNotFound, "ORDER_NOT_FOUND", "order not found", []string{})
+		return
+	}
+	if errors.Is(err, repository.ErrOrderNotCancelable) {
+		response.Error(c, http.StatusConflict, "ORDER_NOT_CANCELABLE", "order cannot be cancelled in its current state", []string{})
+		return
+	}
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
 func userID(c *gin.Context) string {
 	value, _ := c.Get(constants.AuthContextUserIDKey)
 	userID, _ := value.(string)

@@ -134,6 +134,45 @@ func (r *PostgresRepository) GetHistory(ctx context.Context, userID, orderID uui
 	return ordermodels.History{OrderID: orderID, OrderStatus: mapEvents(orderRows), DeliveryStatus: mapEvents(deliveryRows)}, nil
 }
 
+func (r *PostgresRepository) CancelForUser(ctx context.Context, userID, orderID uuid.UUID) (ordermodels.HistoryItem, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var row historyItemRow
+	if err := tx.GetContext(ctx, &row, `
+		SELECT o.order_id, o.status::text, r.name AS restaurant_name, o.total_amount::text,
+		       o.payment_method, d.status::text AS delivery_status, o.created_at
+		FROM orders o JOIN restaurants r ON r.restaurant_id = o.restaurant_id
+		LEFT JOIN deliveries d ON d.order_id = o.order_id AND d.order_created_at = o.created_at
+		WHERE o.order_id = $1 AND o.user_id = $2
+		FOR UPDATE OF o`, orderID, userID); errors.Is(err, sql.ErrNoRows) {
+		return ordermodels.HistoryItem{}, ErrOrderNotFound
+	} else if err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
+	if row.Status == "cancelled" || row.Status == "rejected" || row.Status == "delivered" {
+		return ordermodels.HistoryItem{}, ErrOrderNotCancelable
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE orders SET status = 'cancelled', updated_by = $1, updated_at = NOW() WHERE order_id = $2 AND user_id = $1`, userID, orderID); err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE deliveries SET next_transition_at = NULL, updated_by = $1, updated_at = NOW() WHERE order_id = $2 AND order_created_at = $3 AND status <> 'delivered'`, userID, orderID, row.CreatedAt); err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
+	beforeJSON := fmt.Sprintf(`{"status":%q}`, row.Status)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, before, after) VALUES ($1, 'client', 'order_cancelled', 'order', $2, $3::jsonb, '{"status":"cancelled"}'::jsonb)`, userID, orderID.String(), beforeJSON); err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ordermodels.HistoryItem{}, err
+	}
+	row.Status = "cancelled"
+	row.DeliveryStatus = sql.NullString{}
+	return ordermodels.HistoryItem{OrderID: row.OrderID, Status: row.Status, RestaurantName: row.Restaurant, TotalAmount: mustMinor(row.TotalAmount), Currency: "INR", PaymentMethod: row.PaymentMethod, CreatedAt: row.CreatedAt}, nil
+}
+
 func mapEvents(rows []statusEventRow) []ordermodels.StatusEvent {
 	out := make([]ordermodels.StatusEvent, 0, len(rows))
 	for _, row := range rows {

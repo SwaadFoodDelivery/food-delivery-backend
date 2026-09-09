@@ -10,14 +10,15 @@ import (
 )
 
 var (
-	ErrCartEmpty        = errors.New("cart empty")
-	ErrCartNotActive    = errors.New("cart not active")
-	ErrItemPriceChanged = errors.New("item price changed")
-	ErrItemUnavailable  = errors.New("item unavailable")
-	ErrAddressNotFound  = errors.New("address not found")
-	ErrNotServiceable   = errors.New("address not serviceable")
-	ErrInvalidPayment   = errors.New("invalid payment method")
-	ErrOrderNotFound    = errors.New("order not found")
+	ErrCartEmpty          = errors.New("cart empty")
+	ErrCartNotActive      = errors.New("cart not active")
+	ErrItemPriceChanged   = errors.New("item price changed")
+	ErrItemUnavailable    = errors.New("item unavailable")
+	ErrAddressNotFound    = errors.New("address not found")
+	ErrNotServiceable     = errors.New("address not serviceable")
+	ErrInvalidPayment     = errors.New("invalid payment method")
+	ErrOrderNotFound      = errors.New("order not found")
+	ErrOrderNotCancelable = errors.New("order cannot be cancelled")
 )
 
 type Repository interface {
@@ -29,4 +30,5 @@ type Repository interface {
 type HistoryRepository interface {
 	ListForUser(context.Context, uuid.UUID, int) ([]ordermodels.HistoryItem, error)
 	GetHistory(context.Context, uuid.UUID, uuid.UUID) (ordermodels.History, error)
+	CancelForUser(context.Context, uuid.UUID, uuid.UUID) (ordermodels.HistoryItem, error)
 }
