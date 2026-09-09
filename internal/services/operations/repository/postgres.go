@@ -78,7 +78,7 @@ func (r *PostgresRepository) GetOverview(ctx context.Context, status string) (mo
 		return models.Overview{}, err
 	}
 
-	var total, active, delivered int
+	var total, active, delivered, failedPayments, stalledDeliveries int
 	if err := r.db.GetContext(ctx, &total, `SELECT count(*) FROM orders`); err != nil {
 		return models.Overview{}, err
 	}
@@ -86,6 +86,15 @@ func (r *PostgresRepository) GetOverview(ctx context.Context, status string) (mo
 		return models.Overview{}, err
 	}
 	if err := r.db.GetContext(ctx, &delivered, `SELECT count(*) FROM orders WHERE status = 'delivered'`); err != nil {
+		return models.Overview{}, err
+	}
+	if err := r.db.GetContext(ctx, &failedPayments, `SELECT count(*) FROM payments WHERE status = 'failed'`); err != nil {
+		return models.Overview{}, err
+	}
+	if err := r.db.GetContext(ctx, &stalledDeliveries, `
+		SELECT count(*) FROM deliveries d JOIN orders o ON o.order_id = d.order_id AND o.created_at = d.order_created_at
+		WHERE d.next_transition_at IS NOT NULL AND d.next_transition_at < NOW()
+		  AND d.status <> 'delivered' AND o.status NOT IN ('cancelled', 'rejected', 'delivered')`); err != nil {
 		return models.Overview{}, err
 	}
 
@@ -106,7 +115,7 @@ func (r *PostgresRepository) GetOverview(ctx context.Context, status string) (mo
 		orders = append(orders, mapOrder(row))
 	}
 	return models.Overview{
-		Summary: models.Summary{TotalOrders: total, ActiveOrders: active, DeliveredOrders: delivered, AvailableDrivers: available, ActiveDrivers: activeDrivers},
+		Summary: models.Summary{TotalOrders: total, ActiveOrders: active, DeliveredOrders: delivered, AvailableDrivers: available, ActiveDrivers: activeDrivers, FailedPayments: failedPayments, StalledDeliveries: stalledDeliveries},
 		Orders:  orders,
 		Drivers: drivers,
 	}, nil

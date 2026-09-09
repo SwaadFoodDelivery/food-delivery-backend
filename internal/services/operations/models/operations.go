@@ -13,11 +13,13 @@ type Overview struct {
 }
 
 type Summary struct {
-	TotalOrders      int `json:"total_orders"`
-	ActiveOrders     int `json:"active_orders"`
-	DeliveredOrders  int `json:"delivered_orders"`
-	AvailableDrivers int `json:"available_drivers"`
-	ActiveDrivers    int `json:"active_drivers"`
+	TotalOrders       int `json:"total_orders"`
+	ActiveOrders      int `json:"active_orders"`
+	DeliveredOrders   int `json:"delivered_orders"`
+	AvailableDrivers  int `json:"available_drivers"`
+	ActiveDrivers     int `json:"active_drivers"`
+	FailedPayments    int `json:"failed_payments"`
+	StalledDeliveries int `json:"stalled_deliveries"`
 }
 
 type Order struct {
