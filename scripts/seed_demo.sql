@@ -11,8 +11,21 @@ VALUES
  ('00000000-0000-4000-8000-000000000005', '9000000005', 'Swaad Demo Owner 5', 'demo-owner-5@invalid.swaad.test', TRUE, TRUE, 'restaurant_owner', TRUE),
  ('00000000-0000-4000-8000-000000000011', '9000000011', 'Swaad Demo Driver 1', 'demo-driver-1@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE),
  ('00000000-0000-4000-8000-000000000012', '9000000012', 'Swaad Demo Driver 2', 'demo-driver-2@invalid.swaad.test', TRUE, TRUE, 'driver', TRUE),
- ('00000000-0000-4000-8000-000000000021', '9000000021', 'Swaad Demo Operations', 'demo-operations@invalid.swaad.test', TRUE, TRUE, 'restaurant_manager', TRUE)
+ ('00000000-0000-4000-8000-000000000021', '9000000021', 'Swaad Demo Operations', 'demo-operations@invalid.swaad.test', TRUE, TRUE, 'restaurant_manager', TRUE),
+ ('00000000-0000-4000-8000-000000000031', '9000000031', 'Demo Pending Driver', 'pending-driver@invalid.swaad.test', TRUE, TRUE, 'driver', FALSE)
 ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name, account_status = 'active', is_deleted = FALSE;
+
+-- One complete, pending driver application makes the manager review queue
+-- demonstrable without collecting or storing real identity documents.
+INSERT INTO onboardings (onboarding_id, user_id, role, status)
+VALUES ('50000000-0000-4000-8000-000000000031', '00000000-0000-4000-8000-000000000031', 'driver', 'pending_verification')
+ON CONFLICT (onboarding_id) DO NOTHING;
+INSERT INTO onboarding_documents (onboarding_id, document_type, s3_key, upload_status)
+VALUES
+ ('50000000-0000-4000-8000-000000000031', 'driving_license', 'demo/pending-driver/driving-license', 'uploaded'),
+ ('50000000-0000-4000-8000-000000000031', 'vehicle_registration', 'demo/pending-driver/vehicle-registration', 'uploaded'),
+ ('50000000-0000-4000-8000-000000000031', 'vehicle_insurance', 'demo/pending-driver/vehicle-insurance', 'uploaded')
+ON CONFLICT (onboarding_id, document_type) DO NOTHING;
 
 -- Repeatable notification fixtures for the operations and driver demo views.
 INSERT INTO notifications (notification_id, recipient_id, recipient_type, channels, title, body, status, is_read)

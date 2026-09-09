@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"time"
 
 	"food-delivery-backend/internal/errors"
@@ -12,6 +13,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	rds "github.com/redis/go-redis/v9"
 )
+
+var ErrOnboardingAlreadyReviewed = stderrors.New("onboarding already reviewed")
 
 type Repository interface {
 	FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error)
@@ -61,6 +64,8 @@ type Repository interface {
 	UpdateOnboardingStatus(ctx context.Context, in UpdateOnboardingStatusInput) error
 	MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, s3Key string) (bool, error)
 	SetUserOnboardingComplete(ctx context.Context, userID string, isComplete bool) error
+	ListOnboardingReviews(ctx context.Context, status string) ([]models.OnboardingReviewItem, error)
+	ReviewOnboarding(ctx context.Context, in ReviewOnboardingInput) (*models.OnboardingReviewItem, error)
 
 	GetUserProfileByID(ctx context.Context, userID string) (*models.UserProfileRow, error)
 	GetClientProfileByUserID(ctx context.Context, userID string) (*models.ClientProfileRow, error)

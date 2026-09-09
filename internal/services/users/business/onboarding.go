@@ -2,8 +2,10 @@ package business
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"food-delivery-backend/internal/constants"
@@ -19,6 +21,37 @@ type OnboardingService interface {
 	SubmitOnboarding(ctx context.Context, in models.SubmitOnboardingInput) (*models.SubmitOnboardingOutput, *models.ServiceError)
 	ResubmitOnboarding(ctx context.Context, in models.ResubmitOnboardingInput) (*models.ResubmitOnboardingOutput, *models.ServiceError)
 	MarkDocumentUploaded(ctx context.Context, in models.MarkDocumentUploadedInput) *models.ServiceError
+	ListOnboardingReviews(ctx context.Context, status string) ([]models.OnboardingReviewItem, *models.ServiceError)
+	ReviewOnboarding(ctx context.Context, in models.ReviewOnboardingInput) (*models.ReviewOnboardingOutput, *models.ServiceError)
+}
+
+func (s *Service) ListOnboardingReviews(ctx context.Context, status string) ([]models.OnboardingReviewItem, *models.ServiceError) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != "" && status != constants.OnboardingStatusPendingVerification && status != constants.OnboardingStatusApproved && status != constants.OnboardingStatusRejected {
+		return nil, badRequest(apperrors.CodeValidation, "status must be pending_verification, approved, or rejected")
+	}
+	items, err := s.repo.ListOnboardingReviews(ctx, status)
+	if err != nil { return nil, internalErr("failed to load onboarding reviews") }
+	return items, nil
+}
+
+func (s *Service) ReviewOnboarding(ctx context.Context, in models.ReviewOnboardingInput) (*models.ReviewOnboardingOutput, *models.ServiceError) {
+	actorID := strings.TrimSpace(in.ActorID)
+	onboardingID := strings.TrimSpace(in.OnboardingID)
+	status := strings.ToLower(strings.TrimSpace(in.Status))
+	if actorID == "" || onboardingID == "" { return nil, badRequest(apperrors.CodeValidation, "actor and onboarding IDs are required") }
+	if status != constants.OnboardingStatusApproved && status != constants.OnboardingStatusRejected { return nil, badRequest(apperrors.CodeValidation, "status must be approved or rejected") }
+	reason := strings.TrimSpace(in.RejectionReason)
+	if status == constants.OnboardingStatusRejected && len(reason) < 3 { return nil, badRequest(apperrors.CodeValidation, "rejection_reason is required when rejecting onboarding") }
+	item, err := s.repo.ReviewOnboarding(ctx, repository.ReviewOnboardingInput{ActorID: actorID, OnboardingID: onboardingID, Status: status, RejectionReason: reason})
+	if err != nil {
+		if repository.IsNotFound(err) { return nil, &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeOnboardingNotFound, Message: "onboarding not found", Details: []string{}} }
+		if errors.Is(err, repository.ErrOnboardingAlreadyReviewed) { return nil, badRequest(apperrors.CodeValidation, "onboarding has already been reviewed") }
+		return nil, internalErr("failed to review onboarding")
+	}
+	message := "Onboarding approved"
+	if status == constants.OnboardingStatusRejected { message = "Onboarding rejected with feedback" }
+	return &models.ReviewOnboardingOutput{OnboardingID: item.OnboardingID, Status: item.Status, Message: message}, nil
 }
 
 func (s *Service) InitOnboarding(ctx context.Context, in models.InitOnboardingInput) (*models.InitOnboardingOutput, *models.ServiceError) {

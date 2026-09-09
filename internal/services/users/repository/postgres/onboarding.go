@@ -3,12 +3,15 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"food-delivery-backend/internal/constants"
 	"food-delivery-backend/internal/services/users/models"
 
 	"github.com/jmoiron/sqlx"
 )
+
+var ErrOnboardingAlreadyReviewed = errors.New("onboarding already reviewed")
 
 func (s *Store) ListRequiredDocumentTypes(ctx context.Context, role, country string) ([]models.DocumentTypeDefinitionRow, error) {
 	rows := make([]models.DocumentTypeDefinitionRow, 0)
@@ -120,4 +123,88 @@ func (s *Store) SetUserOnboardingComplete(ctx context.Context, userID string, is
 		WHERE user_id = $1::uuid
 	`, userID, isComplete)
 	return err
+}
+
+func (s *Store) ListOnboardingReviews(ctx context.Context, status string) ([]models.OnboardingReviewItem, error) {
+	items := make([]models.OnboardingReviewItem, 0)
+	err := sqlx.SelectContext(ctx, s.accessor.Queryer(), &items, `
+		SELECT o.onboarding_id::text, o.user_id::text, u.name AS user_name, u.phone,
+		       COALESCE(u.email, '') AS email, o.role::text, o.status,
+		       COALESCE(o.rejection_reason, '') AS rejection_reason,
+		       (SELECT COUNT(*) FROM onboarding_documents d WHERE d.onboarding_id = o.onboarding_id)::int AS required_documents,
+		       (SELECT COUNT(*) FROM onboarding_documents d WHERE d.onboarding_id = o.onboarding_id AND d.upload_status = $2)::int AS uploaded_documents,
+		       o.created_at, o.updated_at
+		FROM onboardings o
+		JOIN users u ON u.user_id = o.user_id
+		WHERE ($1 = '' OR o.status = $1)
+		ORDER BY o.created_at DESC
+		LIMIT 100
+	`, status, constants.OnboardingUploadStatusUploaded)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ReviewOnboarding(ctx context.Context, actorID, onboardingID, status, rejectionReason string) (*models.OnboardingReviewItem, error) {
+	var item models.OnboardingReviewItem
+	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &item, `
+		SELECT o.onboarding_id::text, o.user_id::text, u.name AS user_name, u.phone,
+		       COALESCE(u.email, '') AS email, o.role::text, o.status,
+		       COALESCE(o.rejection_reason, '') AS rejection_reason,
+		       (SELECT COUNT(*) FROM onboarding_documents d WHERE d.onboarding_id = o.onboarding_id)::int AS required_documents,
+		       (SELECT COUNT(*) FROM onboarding_documents d WHERE d.onboarding_id = o.onboarding_id AND d.upload_status = $2)::int AS uploaded_documents,
+		       o.created_at, o.updated_at
+		FROM onboardings o
+		JOIN users u ON u.user_id = o.user_id
+		WHERE o.onboarding_id = $1::uuid
+		FOR UPDATE OF o
+	`, onboardingID, constants.OnboardingUploadStatusUploaded)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	if item.Status != constants.OnboardingStatusPendingVerification {
+		return nil, ErrOnboardingAlreadyReviewed
+	}
+
+	isComplete := status == constants.OnboardingStatusApproved
+	if _, err := s.accessor.Execer().ExecContext(ctx, `
+		UPDATE onboardings
+		SET status = $2, rejection_reason = NULLIF($3, ''), updated_at = NOW()
+		WHERE onboarding_id = $1::uuid
+	`, onboardingID, status, rejectionReason); err != nil {
+		return nil, err
+	}
+	if _, err := s.accessor.Execer().ExecContext(ctx, `
+		UPDATE users
+		SET onboarding_complete = $2, updated_at = NOW()
+		WHERE user_id = $1::uuid
+	`, item.UserID, isComplete); err != nil {
+		return nil, err
+	}
+
+	action := "onboarding_approved"
+	title := "Onboarding approved"
+	body := "Your Swaad onboarding application was approved."
+	if status == constants.OnboardingStatusRejected {
+		action = "onboarding_rejected"
+		title = "Onboarding needs changes"
+		body = "Your Swaad onboarding application needs changes: " + rejectionReason
+	}
+	if _, err := s.accessor.Execer().ExecContext(ctx, `
+		INSERT INTO notifications (recipient_id, recipient_type, channels, title, body, status)
+		VALUES ($1::uuid, $2::user_role, ARRAY['in_app'], $3, $4, 'queued')
+	`, item.UserID, item.Role, title, body); err != nil {
+		return nil, err
+	}
+	if _, err := s.accessor.Execer().ExecContext(ctx, `
+		INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, before, after)
+		VALUES ($1::uuid, 'restaurant_manager', $2, 'onboardings', $3, $4::jsonb, $5::jsonb)
+	`, actorID, action, onboardingID, `{"status":"pending_verification"}`, `{"status":"`+status+`"}`); err != nil {
+		return nil, err
+	}
+
+	item.Status = status
+	item.RejectionReason = rejectionReason
+	return &item, nil
 }

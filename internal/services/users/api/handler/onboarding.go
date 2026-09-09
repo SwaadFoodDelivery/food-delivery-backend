@@ -18,6 +18,11 @@ type OnboardingHandler struct {
 	svc business.OnboardingService
 }
 
+type reviewOnboardingRequest struct {
+	Status          string `json:"status"`
+	RejectionReason string `json:"rejection_reason"`
+}
+
 func NewOnboardingHandler(svc business.OnboardingService) *OnboardingHandler {
 	return &OnboardingHandler{svc: svc}
 }
@@ -91,4 +96,33 @@ func (h *OnboardingHandler) MarkUploaded(c *gin.Context) {
 		return
 	}
 	response.Success(c, http.StatusOK, gin.H{"updated": true})
+}
+
+func (h *OnboardingHandler) ListReviews(c *gin.Context) {
+	items, svcErr := h.svc.ListOnboardingReviews(c.Request.Context(), c.Query("status"))
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"items": items})
+}
+
+func (h *OnboardingHandler) Review(c *gin.Context) {
+	var req reviewOnboardingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid request body", []string{})
+		return
+	}
+	actorID, _ := c.Get(constants.AuthContextUserIDKey)
+	out, svcErr := h.svc.ReviewOnboarding(c.Request.Context(), models.ReviewOnboardingInput{
+		ActorID:         strings.TrimSpace(toString(actorID)),
+		OnboardingID:    strings.TrimSpace(c.Param("id")),
+		Status:          strings.TrimSpace(req.Status),
+		RejectionReason: strings.TrimSpace(req.RejectionReason),
+	})
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
 }

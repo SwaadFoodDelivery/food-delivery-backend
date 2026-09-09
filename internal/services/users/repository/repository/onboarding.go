@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 
 	"food-delivery-backend/internal/services/users/models"
+	postgresstore "food-delivery-backend/internal/services/users/repository/postgres"
 )
 
 type CreateOnboardingInput struct {
@@ -24,6 +26,37 @@ type UpdateOnboardingStatusInput struct {
 	OnboardingID    string
 	Status          string
 	RejectionReason *string
+}
+
+type ReviewOnboardingInput struct {
+	ActorID         string
+	OnboardingID    string
+	Status          string
+	RejectionReason string
+}
+
+func (r *repo) ListOnboardingReviews(ctx context.Context, status string) ([]models.OnboardingReviewItem, error) {
+	return r.pg.ListOnboardingReviews(ctx, status)
+}
+
+func (r *repo) ReviewOnboarding(ctx context.Context, in ReviewOnboardingInput) (*models.OnboardingReviewItem, error) {
+	if r.tx != nil {
+		return r.mapReviewError(r.pg.ReviewOnboarding(ctx, in.ActorID, in.OnboardingID, in.Status, in.RejectionReason))
+	}
+	var item *models.OnboardingReviewItem
+	err := r.WithTx(ctx, func(tx Repository) error {
+		var txErr error
+		item, txErr = tx.ReviewOnboarding(ctx, in)
+		return txErr
+	})
+	return item, err
+}
+
+func (r *repo) mapReviewError(item *models.OnboardingReviewItem, err error) (*models.OnboardingReviewItem, error) {
+	if stderrors.Is(err, postgresstore.ErrOnboardingAlreadyReviewed) {
+		return nil, ErrOnboardingAlreadyReviewed
+	}
+	return item, err
 }
 
 func (r *repo) ListRequiredDocumentTypes(ctx context.Context, role, country string) ([]models.DocumentTypeDefinitionRow, error) {

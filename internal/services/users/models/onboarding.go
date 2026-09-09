@@ -54,6 +54,34 @@ type ResubmitOnboardingOutput struct {
 	Message      string `json:"message"`
 }
 
+type OnboardingReviewItem struct {
+	OnboardingID    string    `json:"onboarding_id"`
+	UserID          string    `json:"user_id"`
+	UserName        string    `json:"user_name"`
+	Phone           string    `json:"phone"`
+	Email           string    `json:"email,omitempty"`
+	Role            string    `json:"role"`
+	Status          string    `json:"status"`
+	RejectionReason string    `json:"rejection_reason,omitempty"`
+	RequiredDocs    int       `json:"required_documents"`
+	UploadedDocs    int       `json:"uploaded_documents"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type ReviewOnboardingInput struct {
+	ActorID        string
+	OnboardingID   string
+	Status         string
+	RejectionReason string
+}
+
+type ReviewOnboardingOutput struct {
+	OnboardingID string `json:"onboarding_id"`
+	Status       string `json:"status"`
+	Message      string `json:"message"`
+}
+
 type InitOnboardingRequest struct {
 	Role    string `json:"role"`
 	Country string `json:"country"`
