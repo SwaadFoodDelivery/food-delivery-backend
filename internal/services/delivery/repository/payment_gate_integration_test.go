@@ -13,6 +13,7 @@ import (
 
 	postgresinfra "food-delivery-backend/infra/postgres"
 	"food-delivery-backend/internal/services/delivery/models"
+	opsrepo "food-delivery-backend/internal/services/operations/repository"
 	orderrepo "food-delivery-backend/internal/services/order/repository"
 	paymentmodels "food-delivery-backend/internal/services/payment/models"
 	paymentrepo "food-delivery-backend/internal/services/payment/repository"
@@ -153,6 +154,47 @@ func TestPaymentDeliveryGatePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	count(cancelled, 0)
+	t.Run("operations overview intervention and audit map real database rows", func(t *testing.T) {
+		id, _ := newOrder("upi")
+		ops := opsrepo.NewPostgresRepository(db)
+		overview, err := ops.GetOverview(ctx, "")
+		if err != nil || len(overview.Drivers) < 2 || overview.Summary.TotalOrders == 0 {
+			t.Fatalf("overview=%+v err=%v", overview, err)
+		}
+		actor := uuid.MustParse("00000000-0000-4000-8000-000000000021")
+		if _, err := ops.CancelOrder(ctx, actor, id); err != nil {
+			t.Fatal(err)
+		}
+		events, err := ops.ListAuditEvents(ctx, "ops_order_cancelled", "order", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, event := range events {
+			if event.EntityID == id.String() {
+				found = true
+				if event.ActorID != actor.String() || event.ActorRole != "restaurant_manager" || event.After == "" || event.OccurredAt.IsZero() {
+					t.Fatalf("incorrect audit mapping: %+v", event)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("operation audit missing")
+		}
+		overview, err = ops.GetOverview(ctx, "cancelled")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found = false
+		for _, order := range overview.Orders {
+			if order.OrderID == id {
+				found = order.Status == "cancelled" && order.DeliveryStatus == ""
+			}
+		}
+		if !found {
+			t.Fatal("cancelled order missing from filtered overview")
+		}
+	})
 	t.Run("customer cancellation and legacy current status are readable", func(t *testing.T) {
 		id, _ := newOrder("upi")
 		orders := orderrepo.NewPostgresRepository(db)

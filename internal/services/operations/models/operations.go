@@ -46,13 +46,13 @@ type Driver struct {
 }
 
 type AuditEvent struct {
-	AuditID    int64     `json:"audit_id"`
-	OccurredAt time.Time `json:"occurred_at"`
-	ActorID    string    `json:"actor_id,omitempty"`
-	ActorRole  string    `json:"actor_role,omitempty"`
-	Action     string    `json:"action"`
-	EntityType string    `json:"entity_type"`
-	EntityID   string    `json:"entity_id"`
-	Before     string    `json:"before,omitempty"`
-	After      string    `json:"after,omitempty"`
+	AuditID    int64     `json:"audit_id" db:"audit_id"`
+	OccurredAt time.Time `json:"occurred_at" db:"occurred_at"`
+	ActorID    string    `json:"actor_id,omitempty" db:"actor_id"`
+	ActorRole  string    `json:"actor_role,omitempty" db:"actor_role"`
+	Action     string    `json:"action" db:"action"`
+	EntityType string    `json:"entity_type" db:"entity_type"`
+	EntityID   string    `json:"entity_id" db:"entity_id"`
+	Before     string    `json:"before,omitempty" db:"before"`
+	After      string    `json:"after,omitempty" db:"after"`
 }
