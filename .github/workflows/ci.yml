@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - codex/vert-001-catalog
+      - codex/serviceability-policy
     paths-ignore:
       - "**/.env"
       - "**/.env.*"
@@ -87,7 +88,9 @@ jobs:
           SERVICEABILITY_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
           MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
           ONBOARDING_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
+          PAYMENT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
         run: |
           go test -race ./infra/postgres -run 'TestMigrationsAndDemoSeed|TestOnboardingApprovalMigration28' -count=1 -v
           go test -race ./internal/services/users/business -run TestOnboardingIntegration -count=1 -v
           go test -race ./internal/services/order/repository -run TestServiceabilityPostGIS -count=1 -v
+          go test -race ./internal/services/delivery/repository -run TestPaymentDeliveryGatePostgres -count=1 -v

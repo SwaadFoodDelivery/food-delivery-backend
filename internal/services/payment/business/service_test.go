@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,11 +10,58 @@ import (
 	"github.com/google/uuid"
 )
 
+type recordingDelivery struct {
+	calls int
+	err   error
+}
+
+func (d *recordingDelivery) EnsureForOrder(context.Context, uuid.UUID, time.Time) error {
+	d.calls++
+	return d.err
+}
+
+func TestPaymentOnlySchedulesAfterPersistedSuccess(t *testing.T) {
+	for _, token := range []string{"demo-token", "mock_fail"} {
+		t.Run(token, func(t *testing.T) {
+			userID, orderID := uuid.New(), uuid.New()
+			r := &fakeRepository{order: models.Order{OrderID: orderID, UserID: userID, CreatedAt: time.Now(), TotalAmount: 10000, PaymentMethod: "upi", Status: "order_created"}}
+			d := &recordingDelivery{err: errors.New("no courier")}
+			s := NewService(r, NewMockProvider(), d)
+			out, _, err := s.Pay(context.Background(), Input{UserID: userID.String(), OrderID: orderID.String(), PaymentToken: token, IdempotencyKey: "schedule-test"})
+			if token == "mock_fail" {
+				if err == nil || d.calls != 0 {
+					t.Fatalf("declined payment scheduled delivery: calls=%d err=%v", d.calls, err)
+				}
+				return
+			}
+			if err != nil || out.Status != models.StatusSuccess || d.calls != 1 {
+				t.Fatalf("successful payment lost during courier outage: %+v calls=%d err=%v", out, d.calls, err)
+			}
+			r.known = out
+			r.found = true
+			_, replay, err := s.Pay(context.Background(), Input{UserID: userID.String(), OrderID: orderID.String(), IdempotencyKey: "schedule-test"})
+			if err != nil || !replay || d.calls != 2 {
+				t.Fatalf("success replay did not retry assignment: %v %v calls=%d", replay, err, d.calls)
+			}
+		})
+	}
+}
+
 type fakeRepository struct {
 	order   models.Order
 	known   models.Payment
 	found   bool
 	created models.Payment
+}
+
+func TestDeclinedReplayIsNotReportedAsSuccess(t *testing.T) {
+	id := uuid.New()
+	r := &fakeRepository{found: true, known: models.Payment{OrderID: id, Status: models.StatusFailed, FailureCode: "PAYMENT_DECLINED"}}
+	out, replay, err := NewService(r, NewMockProvider()).Pay(context.Background(), Input{UserID: uuid.NewString(), OrderID: id.String(), IdempotencyKey: "declined"})
+	var se *ServiceError
+	if !errors.As(err, &se) || se.StatusCode != 402 || !replay || out.Status != models.StatusFailed {
+		t.Fatalf("declined replay=%v out=%+v err=%v", replay, out, err)
+	}
 }
 
 func (f *fakeRepository) FindOrderForPayment(context.Context, uuid.UUID, uuid.UUID) (models.Order, error) {

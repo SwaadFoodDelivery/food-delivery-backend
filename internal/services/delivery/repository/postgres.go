@@ -35,6 +35,21 @@ func (r *PostgresRepository) EnsureMockDelivery(ctx context.Context, orderID uui
 		return models.Delivery{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Serialize creation with cancellation and only schedule a prepaid order
+	// after persisted success. An unpaid placement is valid, but has no courier.
+	var order struct {
+		Status string `db:"status"`
+		Paid   bool   `db:"paid"`
+	}
+	if err := tx.GetContext(ctx, &order, `SELECT o.status::text,
+		(o.payment_method='cash_on_delivery' OR EXISTS (SELECT 1 FROM payments p
+		 WHERE p.order_id=o.order_id AND p.order_created_at=o.created_at AND p.status='success')) AS paid
+		FROM orders o WHERE o.order_id=$1 AND o.created_at=$2 FOR UPDATE OF o`, orderID, createdAt); err != nil {
+		return models.Delivery{}, err
+	}
+	if !order.Paid || order.Status == "cancelled" || order.Status == "rejected" || order.Status == "delivered" {
+		return models.Delivery{}, nil
+	}
 
 	var row deliveryRow
 	err = tx.GetContext(ctx, &row, deliverySelect+` WHERE d.order_id = $1 AND d.order_created_at = $2 FOR UPDATE`, orderID, createdAt)
@@ -44,7 +59,7 @@ func (r *PostgresRepository) EnsureMockDelivery(ctx context.Context, orderID uui
 			SELECT u.user_id
 			FROM users u
 			JOIN driver_profiles dp ON dp.user_id = u.user_id
-			WHERE u.role = 'driver' AND u.account_status = 'active' AND u.is_deleted = FALSE
+			WHERE u.role = 'driver' AND u.account_status = 'active' AND u.is_deleted = FALSE AND u.onboarding_complete = TRUE
 			  AND dp.is_available = TRUE
 			  AND NOT EXISTS (
 				SELECT 1
@@ -56,7 +71,7 @@ func (r *PostgresRepository) EnsureMockDelivery(ctx context.Context, orderID uui
 			  )
 			ORDER BY u.user_id
 			LIMIT 1
-			FOR UPDATE OF u`)
+			FOR UPDATE OF u SKIP LOCKED`)
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.Delivery{}, ErrNoDemoPartner
 		}
@@ -83,7 +98,7 @@ func (r *PostgresRepository) EnsureMockDelivery(ctx context.Context, orderID uui
 
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE orders SET status = 'confirmed', updated_at = NOW()
-		WHERE order_id = $1 AND created_at = $2 AND status NOT IN ('cancelled', 'rejected', 'delivered')`, orderID, createdAt); err != nil {
+		WHERE order_id = $1 AND created_at = $2 AND status IN ('order_created','pending_payment')`, orderID, createdAt); err != nil {
 		return models.Delivery{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -93,6 +108,24 @@ func (r *PostgresRepository) EnsureMockDelivery(ctx context.Context, orderID uui
 }
 
 func (r *PostgresRepository) AdvanceMockDeliveries(ctx context.Context, now time.Time, duration time.Duration) error {
+	// Recover the payment-commit / assignment gap after a crash or unavailable
+	// partner. Persisted paid orders are the retry queue, not process memory.
+	var awaiting []struct {
+		OrderID   uuid.UUID `db:"order_id"`
+		CreatedAt time.Time `db:"created_at"`
+	}
+	if err := r.db.SelectContext(ctx, &awaiting, `SELECT o.order_id,o.created_at FROM orders o
+		WHERE o.status NOT IN ('cancelled','rejected','delivered')
+		AND (o.payment_method='cash_on_delivery' OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id=o.order_id AND p.order_created_at=o.created_at AND p.status='success'))
+		AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.order_id=o.order_id AND d.order_created_at=o.created_at)
+		ORDER BY o.created_at LIMIT 50`); err != nil {
+		return err
+	}
+	for _, pending := range awaiting {
+		if _, err := r.EnsureMockDelivery(ctx, pending.OrderID, pending.CreatedAt, duration); err != nil && !errors.Is(err, ErrNoDemoPartner) {
+			return err
+		}
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -112,6 +145,7 @@ func (r *PostgresRepository) AdvanceMockDeliveries(ctx context.Context, now time
 		JOIN orders o ON o.order_id = d.order_id AND o.created_at = d.order_created_at
 		WHERE d.provider = 'mock' AND d.next_transition_at IS NOT NULL AND d.next_transition_at <= $1
 		  AND o.status NOT IN ('cancelled', 'rejected')
+		  AND (o.payment_method='cash_on_delivery' OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id=o.order_id AND p.order_created_at=o.created_at AND p.status='success'))
 		FOR UPDATE OF d, o SKIP LOCKED`, now); err != nil {
 		return err
 	}
@@ -194,6 +228,7 @@ func (r *PostgresRepository) UpdateForDriver(ctx context.Context, driverID uuid.
 		  AND d.provider = 'mock'
 		  AND d.status <> 'delivered'
 		  AND o.status NOT IN ('cancelled', 'rejected', 'delivered')
+		  AND (o.payment_method='cash_on_delivery' OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id=o.order_id AND p.order_created_at=o.created_at AND p.status='success'))
 		ORDER BY d.updated_at DESC
 		LIMIT 1
 		FOR UPDATE OF d, o`, driverID)

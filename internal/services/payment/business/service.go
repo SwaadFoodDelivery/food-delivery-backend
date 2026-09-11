@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/payment/models"
@@ -33,10 +34,27 @@ func (e *ServiceError) Error() string { return e.Message }
 type service struct {
 	repo     repository.Repository
 	provider Provider
+	delivery DeliveryService
 }
 
-func NewService(repo repository.Repository, provider Provider) Service {
-	return &service{repo: repo, provider: provider}
+type DeliveryService interface {
+	EnsureForOrder(context.Context, uuid.UUID, time.Time) error
+}
+
+func NewService(repo repository.Repository, provider Provider, deliveries ...DeliveryService) Service {
+	s := &service{repo: repo, provider: provider}
+	if len(deliveries) > 0 {
+		s.delivery = deliveries[0]
+	}
+	return s
+}
+
+func (s *service) schedulePaid(ctx context.Context, order models.Order, payment models.Payment) {
+	if s.delivery != nil && payment.Status == models.StatusSuccess {
+		// Payment is already durably successful. The delivery worker retries
+		// missing assignments; a courier outage must not invite another charge.
+		_ = s.delivery.EnsureForOrder(ctx, order.OrderID, order.CreatedAt)
+	}
 }
 
 func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, error) {
@@ -74,6 +92,10 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 		if existing.Status == models.StatusPending {
 			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "PAYMENT_IN_PROGRESS", Message: "payment is already in progress"}
 		}
+		if existing.Status == models.StatusFailed {
+			return existing, true, &ServiceError{StatusCode: 402, Code: existing.FailureCode, Message: "payment was declined"}
+		}
+		s.schedulePaid(ctx, order, existing)
 		return existing, true, nil
 	}
 	pending, replay, err := s.repo.CreatePending(ctx, models.Payment{OrderID: order.OrderID, CreatedAt: order.CreatedAt, UserID: userID, Amount: order.TotalAmount, Provider: "mock"}, key)
@@ -87,6 +109,10 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 		if pending.Status == models.StatusPending {
 			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "PAYMENT_IN_PROGRESS", Message: "payment is already in progress"}
 		}
+		if pending.Status == models.StatusFailed {
+			return pending, true, &ServiceError{StatusCode: 402, Code: pending.FailureCode, Message: "payment was declined"}
+		}
+		s.schedulePaid(ctx, order, pending)
 		return pending, true, nil
 	}
 	charge, chargeErr := s.provider.Charge(ctx, ChargeInput{AmountMinor: order.TotalAmount, Currency: "INR", PaymentToken: in.PaymentToken})
@@ -105,5 +131,6 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 	if err != nil {
 		return models.Payment{}, false, err
 	}
+	s.schedulePaid(ctx, order, completed)
 	return completed, false, nil
 }
