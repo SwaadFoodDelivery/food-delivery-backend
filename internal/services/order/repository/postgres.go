@@ -108,12 +108,16 @@ func (r *PostgresRepository) ListForUser(ctx context.Context, userID uuid.UUID, 
 }
 
 func (r *PostgresRepository) GetHistory(ctx context.Context, userID, orderID uuid.UUID) (ordermodels.History, error) {
-	var createdAt time.Time
-	if err := r.db.GetContext(ctx, &createdAt, `SELECT created_at FROM orders WHERE order_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1`, orderID, userID); errors.Is(err, sql.ErrNoRows) {
+	var current struct {
+		CreatedAt time.Time `db:"created_at"`
+		Status    string    `db:"status"`
+	}
+	if err := r.db.GetContext(ctx, &current, `SELECT created_at,status::text FROM orders WHERE order_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1`, orderID, userID); errors.Is(err, sql.ErrNoRows) {
 		return ordermodels.History{}, ErrOrderNotFound
 	} else if err != nil {
 		return ordermodels.History{}, err
 	}
+	createdAt := current.CreatedAt
 	var orderRows []statusEventRow
 	if err := r.db.SelectContext(ctx, &orderRows, `
 		SELECT from_status::text, to_status::text, changed_at
@@ -133,7 +137,7 @@ func (r *PostgresRepository) GetHistory(ctx context.Context, userID, orderID uui
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return ordermodels.History{}, err
 	}
-	return ordermodels.History{OrderID: orderID, OrderStatus: mapEvents(orderRows), DeliveryStatus: mapEvents(deliveryRows)}, nil
+	return ordermodels.History{OrderID: orderID, Status: current.Status, OrderStatus: mapEvents(orderRows), DeliveryStatus: mapEvents(deliveryRows)}, nil
 }
 
 func (r *PostgresRepository) CancelForUser(ctx context.Context, userID, orderID uuid.UUID) (ordermodels.HistoryItem, error) {

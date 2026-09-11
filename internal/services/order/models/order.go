@@ -88,6 +88,7 @@ type StatusEvent struct {
 
 type History struct {
 	OrderID        uuid.UUID     `json:"order_id"`
+	Status         string        `json:"status"`
 	OrderStatus    []StatusEvent `json:"order_status"`
 	DeliveryStatus []StatusEvent `json:"delivery_status"`
 }

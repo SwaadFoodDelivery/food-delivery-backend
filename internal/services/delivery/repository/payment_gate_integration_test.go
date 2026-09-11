@@ -13,6 +13,7 @@ import (
 
 	postgresinfra "food-delivery-backend/infra/postgres"
 	"food-delivery-backend/internal/services/delivery/models"
+	orderrepo "food-delivery-backend/internal/services/order/repository"
 	paymentmodels "food-delivery-backend/internal/services/payment/models"
 	paymentrepo "food-delivery-backend/internal/services/payment/repository"
 	"github.com/google/uuid"
@@ -152,6 +153,26 @@ func TestPaymentDeliveryGatePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	count(cancelled, 0)
+	t.Run("customer cancellation and legacy current status are readable", func(t *testing.T) {
+		id, _ := newOrder("upi")
+		orders := orderrepo.NewPostgresRepository(db)
+		userID := uuid.MustParse("00000000-0000-4000-8000-000000000004")
+		if _, err := orders.CancelForUser(ctx, userID, id); err != nil {
+			t.Fatal(err)
+		}
+		history, err := orders.GetHistory(ctx, userID, id)
+		if err != nil || history.Status != "cancelled" || len(history.OrderStatus) != 1 || history.OrderStatus[0].ToStatus != "cancelled" {
+			t.Fatalf("cancellation not persisted: %+v %v", history, err)
+		}
+		exec(`DELETE FROM order_status_history WHERE order_id=$1`, id) // simulate a pre-29 order, only this test fixture
+		history, err = orders.GetHistory(ctx, userID, id)
+		if err != nil || history.Status != "cancelled" || len(history.OrderStatus) != 0 {
+			t.Fatalf("legacy state missing or events fabricated: %+v %v", history, err)
+		}
+		if _, err := orders.GetHistory(ctx, uuid.New(), id); err != orderrepo.ErrOrderNotFound {
+			t.Fatalf("history leaked to another customer: %v", err)
+		}
+	})
 	// Retries with different keys must not create concurrent charge attempts or
 	// charge an already-paid order after the original HTTP response was lost.
 	retryID, retryCreated := newOrder("upi")

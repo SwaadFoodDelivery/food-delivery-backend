@@ -47,8 +47,8 @@ func TestMigrationsAndDemoSeed(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT version, dirty FROM schema_migrations LIMIT 1`).Scan(&version, &dirty); err != nil {
 		t.Fatalf("read migration state: %v", err)
 	}
-	if version != 28 || dirty {
-		t.Fatalf("migration state version=%d dirty=%v, want version 28 and clean", version, dirty)
+	if version != 29 || dirty {
+		t.Fatalf("migration state version=%d dirty=%v, want version 29 and clean", version, dirty)
 	}
 
 	var restaurants int
