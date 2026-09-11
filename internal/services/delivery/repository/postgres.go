@@ -146,7 +146,7 @@ func (r *PostgresRepository) AdvanceMockDeliveries(ctx context.Context, now time
 		WHERE d.provider = 'mock' AND d.next_transition_at IS NOT NULL AND d.next_transition_at <= $1
 		  AND o.status NOT IN ('cancelled', 'rejected')
 		  AND (o.payment_method='cash_on_delivery' OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id=o.order_id AND p.order_created_at=o.created_at AND p.status='success'))
-		FOR UPDATE OF d, o SKIP LOCKED`, now); err != nil {
+		FOR UPDATE OF o SKIP LOCKED`, now); err != nil {
 		return err
 	}
 
@@ -231,7 +231,7 @@ func (r *PostgresRepository) UpdateForDriver(ctx context.Context, driverID uuid.
 		  AND (o.payment_method='cash_on_delivery' OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id=o.order_id AND p.order_created_at=o.created_at AND p.status='success'))
 		ORDER BY d.updated_at DESC
 		LIMIT 1
-		FOR UPDATE OF d, o`, driverID)
+		FOR UPDATE OF o`, driverID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Delivery{}, ErrDeliveryNotFound
 	}

@@ -100,6 +100,9 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 	}
 	pending, replay, err := s.repo.CreatePending(ctx, models.Payment{OrderID: order.OrderID, CreatedAt: order.CreatedAt, UserID: userID, Amount: order.TotalAmount, Provider: "mock"}, key)
 	if err != nil {
+		if errors.Is(err, repository.ErrOrderNotPayable) {
+			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "ORDER_NOT_PAYABLE", Message: "order is no longer payable"}
+		}
 		return models.Payment{}, false, err
 	}
 	if replay {

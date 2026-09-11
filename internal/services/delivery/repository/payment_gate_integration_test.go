@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	postgresinfra "food-delivery-backend/infra/postgres"
 	"food-delivery-backend/internal/services/delivery/models"
+	paymentmodels "food-delivery-backend/internal/services/payment/models"
+	paymentrepo "food-delivery-backend/internal/services/payment/repository"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -149,6 +152,59 @@ func TestPaymentDeliveryGatePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	count(cancelled, 0)
+	// Retries with different keys must not create concurrent charge attempts or
+	// charge an already-paid order after the original HTTP response was lost.
+	retryID, retryCreated := newOrder("upi")
+	exec(`UPDATE orders SET subtotal=100.05,total_amount=136.05 WHERE order_id=$1`, retryID)
+	payments := paymentrepo.NewPostgresRepository(db)
+	input := paymentmodels.Payment{OrderID: retryID, CreatedAt: retryCreated, UserID: uuid.MustParse("00000000-0000-4000-8000-000000000004"), Amount: 13605, Provider: "mock"}
+	type attempt struct {
+		payment paymentmodels.Payment
+		replay  bool
+		err     error
+	}
+	results := make(chan attempt, 8)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, replay, err := payments.CreatePending(ctx, input, uuid.NewString())
+			results <- attempt{p, replay, err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	var paymentID uuid.UUID
+	createdAttempts := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if !result.replay {
+			createdAttempts++
+		}
+		if paymentID == uuid.Nil {
+			paymentID = result.payment.PaymentID
+		}
+		if paymentID != result.payment.PaymentID {
+			t.Fatal("concurrent requests created different payments")
+		}
+	}
+	if createdAttempts != 1 {
+		t.Fatalf("created %d charge attempts", createdAttempts)
+	}
+	paid, err := payments.Complete(ctx, paymentID, paymentmodels.StatusSuccess, "test_"+uuid.NewString(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paid.Amount != 13605 {
+		t.Fatalf("fractional amount changed: %d", paid.Amount)
+	}
+	again, replay, err := payments.CreatePending(ctx, input, uuid.NewString())
+	if err != nil || !replay || again.PaymentID != paymentID || again.Status != paymentmodels.StatusSuccess {
+		t.Fatalf("lost response retry=%+v replay=%v err=%v", again, replay, err)
+	}
 	// Only generated test orders are removed, never the seed or dev records.
 	for _, orderID := range []uuid.UUID{id, cod, cancelled} {
 		exec(`DELETE FROM payments WHERE order_id=$1`, orderID)
