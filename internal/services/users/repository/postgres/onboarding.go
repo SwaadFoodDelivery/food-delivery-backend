@@ -33,6 +33,7 @@ func (s *Store) ListRequiredDocumentTypes(ctx context.Context, role, country str
 func (s *Store) CreateOnboarding(ctx context.Context, userID, role, status string) (*models.OnboardingRow, error) {
 	// The caller holds a transaction. Serializing initialization per account
 	// makes retry/reload resume the application instead of creating duplicates.
+	// Init, submit, resubmit, and review lock the user before child rows.
 	var lockedUser string
 	if err := sqlx.GetContext(ctx, s.accessor.Queryer(), &lockedUser,
 		`SELECT user_id::text FROM users WHERE user_id = $1::uuid AND role = $2::user_role FOR UPDATE`, userID, role); err != nil {
@@ -105,6 +106,13 @@ func (s *Store) CountPendingOnboardingDocuments(ctx context.Context, onboardingI
 }
 
 func (s *Store) UpdateOnboardingStatus(ctx context.Context, onboardingID, expectedStatus, status string, rejectionReason *string) error {
+	latest, err := s.lockLatestOnboarding(ctx, onboardingID)
+	if err != nil {
+		return err
+	}
+	if !latest {
+		return ErrOnboardingStateConflict
+	}
 	var reason any
 	if rejectionReason != nil {
 		reason = *rejectionReason
@@ -132,6 +140,30 @@ func (s *Store) UpdateOnboardingStatus(ctx context.Context, onboardingID, expect
 		return ErrOnboardingStateConflict
 	}
 	return nil
+}
+
+// lockLatestOnboarding must run in the caller's transaction so the account lock
+// remains held through the application transition, approval flag, and audit.
+// Lock the account first, matching init, then read latest in a fresh statement
+// after any competing account transaction has committed.
+func (s *Store) lockLatestOnboarding(ctx context.Context, onboardingID string) (bool, error) {
+	var userID string
+	if err := sqlx.GetContext(ctx, s.accessor.Queryer(), &userID, `
+		SELECT u.user_id::text FROM users u
+		JOIN onboardings o ON o.user_id = u.user_id
+		WHERE o.onboarding_id = $1::uuid
+		FOR UPDATE OF u
+	`, onboardingID); err != nil {
+		return false, mapNotFound(err)
+	}
+	var latestID string
+	if err := sqlx.GetContext(ctx, s.accessor.Queryer(), &latestID, `
+		SELECT onboarding_id::text FROM onboardings WHERE user_id = $1::uuid
+		ORDER BY created_at DESC, onboarding_id DESC LIMIT 1
+	`, userID); err != nil {
+		return false, mapNotFound(err)
+	}
+	return latestID == onboardingID, nil
 }
 
 func (s *Store) FindUploadableOnboardingDocument(ctx context.Context, userID, s3Key string) (*models.OnboardingDocumentRow, error) {
@@ -197,8 +229,15 @@ func (s *Store) ListOnboardingReviews(ctx context.Context, status string) ([]mod
 }
 
 func (s *Store) ReviewOnboarding(ctx context.Context, actorID, onboardingID, status, rejectionReason string) (*models.OnboardingReviewItem, error) {
+	latest, err := s.lockLatestOnboarding(ctx, onboardingID)
+	if err != nil {
+		return nil, err
+	}
+	if !latest {
+		return nil, ErrOnboardingAlreadyReviewed
+	}
 	var item models.OnboardingReviewItem
-	err := sqlx.GetContext(ctx, s.accessor.Queryer(), &item, `
+	err = sqlx.GetContext(ctx, s.accessor.Queryer(), &item, `
 		SELECT o.onboarding_id::text, o.user_id::text, u.name AS user_name, u.phone,
 		       COALESCE(u.email, '') AS email, o.role::text, o.status,
 		       COALESCE(o.rejection_reason, '') AS rejection_reason,
@@ -214,18 +253,6 @@ func (s *Store) ReviewOnboarding(ctx context.Context, actorID, onboardingID, sta
 		return nil, mapNotFound(err)
 	}
 	if item.Status != constants.OnboardingStatusPendingVerification {
-		return nil, ErrOnboardingAlreadyReviewed
-	}
-	// Legacy versions could create several applications for one account.
-	// A stale queue entry must never override the latest application's decision.
-	var latestID string
-	if err := sqlx.GetContext(ctx, s.accessor.Queryer(), &latestID, `
-		SELECT onboarding_id::text FROM onboardings WHERE user_id = $1::uuid
-		ORDER BY created_at DESC, onboarding_id DESC LIMIT 1
-	`, item.UserID); err != nil {
-		return nil, err
-	}
-	if latestID != onboardingID {
 		return nil, ErrOnboardingAlreadyReviewed
 	}
 	if status == constants.OnboardingStatusApproved && (item.RequiredDocs == 0 || item.UploadedDocs != item.RequiredDocs) {

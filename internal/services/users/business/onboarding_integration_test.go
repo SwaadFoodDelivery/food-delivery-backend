@@ -218,7 +218,7 @@ func TestOnboardingIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer lock.Rollback()
-		if _, err := lock.ExecContext(ctx, `SELECT onboarding_id FROM onboardings WHERE onboarding_id = $1::uuid FOR UPDATE`, f.application.OnboardingID); err != nil {
+		if _, err := lock.ExecContext(ctx, `SELECT user_id FROM users WHERE user_id = $1::uuid FOR UPDATE`, f.userID); err != nil {
 			t.Fatal(err)
 		}
 		const submitters = 8
@@ -231,13 +231,13 @@ func TestOnboardingIntegration(t *testing.T) {
 				results <- svcErr
 			}()
 		}
-		// All readers must see draft and reach the blocked CAS, rather than
+		// All readers must see draft and reach the blocked account lock, rather than
 		// letting a fast winner turn this into sequential validation checks.
 		blocked := 0
 		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
 			if err := db.GetContext(raceCtx, &blocked, `SELECT COUNT(*) FROM pg_stat_activity
 				WHERE datname = current_database() AND pid <> pg_backend_pid()
-				AND wait_event_type = 'Lock' AND query LIKE '%UPDATE onboardings%'`); err != nil {
+				AND wait_event_type = 'Lock' AND query LIKE '%FROM users%' AND query LIKE '%FOR UPDATE OF u%'`); err != nil {
 				t.Errorf("observe competing submits: %v", err)
 				break
 			}
@@ -263,6 +263,117 @@ func TestOnboardingIntegration(t *testing.T) {
 		}
 		f.assertState(constants.OnboardingStatusPendingVerification, false)
 		f.assertAudit(constants.AuditActionOnboardingSubmit, 1)
+	})
+
+	for _, latestStatus := range []string{constants.OnboardingStatusPendingVerification, constants.OnboardingStatusApproved} {
+		t.Run("obsolete_transitions_preserve_latest_"+latestStatus, func(t *testing.T) {
+			f := newOnboardingFixture(t, ctx, db)
+			f.init()
+			f.uploadAll()
+			f.submit()
+			if latestStatus == constants.OnboardingStatusApproved {
+				f.review(latestStatus)
+			}
+			for _, oldStatus := range []string{constants.OnboardingStatusDraft, constants.OnboardingStatusRejected} {
+				oldID := f.createLegacyApplication(oldStatus)
+				var svcErr *models.ServiceError
+				if oldStatus == constants.OnboardingStatusDraft {
+					_, svcErr = f.service.SubmitOnboarding(ctx, models.SubmitOnboardingInput{UserID: f.userID, OnboardingID: oldID})
+				} else {
+					_, svcErr = f.service.ResubmitOnboarding(ctx, models.ResubmitOnboardingInput{UserID: f.userID, OnboardingID: oldID})
+				}
+				wantServiceStatus(t, svcErr, http.StatusConflict)
+				f.assertLegacyUnchanged(oldID, oldStatus)
+				f.assertState(latestStatus, latestStatus == constants.OnboardingStatusApproved)
+			}
+		})
+	}
+
+	t.Run("init_review_and_obsolete_transitions_serialize_on_account_first", func(t *testing.T) {
+		f := newOnboardingFixture(t, ctx, db)
+		f.init()
+		f.uploadAll()
+		f.submit()
+		oldDraft := f.createLegacyApplication(constants.OnboardingStatusDraft)
+		oldRejected := f.createLegacyApplication(constants.OnboardingStatusRejected)
+		raceCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		lock, err := db.BeginTxx(raceCtx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Rollback()
+		var lockerPID int
+		if err := lock.GetContext(raceCtx, &lockerPID, `SELECT pg_backend_pid()`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := lock.ExecContext(raceCtx, `SELECT user_id FROM users WHERE user_id=$1::uuid FOR UPDATE`, f.userID); err != nil {
+			t.Fatal(err)
+		}
+		type result struct {
+			action string
+			err    *models.ServiceError
+			init   *models.InitOnboardingOutput
+		}
+		results := make(chan result, 4)
+		go func() {
+			_, svcErr := f.service.SubmitOnboarding(raceCtx, models.SubmitOnboardingInput{UserID: f.userID, OnboardingID: oldDraft})
+			results <- result{action: "submit", err: svcErr}
+		}()
+		go func() {
+			_, svcErr := f.service.ResubmitOnboarding(raceCtx, models.ResubmitOnboardingInput{UserID: f.userID, OnboardingID: oldRejected})
+			results <- result{action: "resubmit", err: svcErr}
+		}()
+		go func() {
+			_, svcErr := f.service.ReviewOnboarding(raceCtx, models.ReviewOnboardingInput{ActorID: f.actorID, OnboardingID: f.application.OnboardingID, Status: constants.OnboardingStatusApproved})
+			results <- result{action: "review", err: svcErr}
+		}()
+		go func() {
+			out, svcErr := f.service.InitOnboarding(raceCtx, models.InitOnboardingInput{UserID: f.userID, Role: constants.RoleRestaurantOwner, Country: "IN"})
+			results <- result{action: "init", err: svcErr, init: out}
+		}()
+		// Each operation must block on the account before taking an application
+		// lock. Inspect real lock waits, not goroutine scheduling or a fixed sleep.
+		blocked := 0
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+			// Later row-lock waiters can queue behind the first waiter instead of
+			// the holder itself, so follow the full blocking chain for this account.
+			if err := db.GetContext(raceCtx, &blocked, `WITH RECURSIVE waiters(pid) AS (
+				SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))
+				UNION
+				SELECT a.pid FROM pg_stat_activity a JOIN waiters w ON w.pid=ANY(pg_blocking_pids(a.pid))
+			)
+			SELECT COUNT(*) FROM pg_stat_activity a JOIN waiters w ON w.pid=a.pid
+			WHERE datname=current_database() AND wait_event_type='Lock'
+			AND query LIKE '%FROM users%' AND query LIKE '%FOR UPDATE%'`, lockerPID); err != nil {
+				t.Errorf("observe account lock: %v", err)
+				break
+			}
+			if blocked == 4 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err := lock.Rollback(); err != nil {
+			t.Errorf("release account lock: %v", err)
+		}
+		for i := 0; i < 4; i++ {
+			got := <-results
+			if got.action == "submit" || got.action == "resubmit" {
+				wantServiceStatus(t, got.err, http.StatusConflict)
+			} else if got.err != nil {
+				t.Errorf("%s: %+v", got.action, got.err)
+			} else if got.action == "init" && (got.init == nil || got.init.OnboardingID != f.application.OnboardingID || len(got.init.Documents) != 0) {
+				t.Errorf("init did not resume the latest application without uploads: %+v", got.init)
+			}
+		}
+		if blocked != 4 {
+			t.Fatalf("operations waiting on account first=%d, want 4", blocked)
+		}
+		f.assertState(constants.OnboardingStatusApproved, true)
+		f.assertLegacyUnchanged(oldDraft, constants.OnboardingStatusDraft)
+		f.assertLegacyUnchanged(oldRejected, constants.OnboardingStatusRejected)
+		f.assertAudit("onboarding_approved", 1)
 	})
 
 	t.Run("stale_cas_cannot_overwrite_approval", func(t *testing.T) {
@@ -363,6 +474,33 @@ func (f *onboardingFixture) createUser(role string) string {
 		}
 	})
 	return id.String()
+}
+
+func (f *onboardingFixture) createLegacyApplication(status string) string {
+	f.t.Helper()
+	id := uuid.NewString()
+	f.exec(`INSERT INTO onboardings (onboarding_id,user_id,role,status,rejection_reason,created_at)
+		VALUES ($1::uuid,$2::uuid,'restaurant_owner',$3,'Legacy feedback',NOW()-INTERVAL '1 day')`, id, f.userID, status)
+	// Complete documents ensure a stale submit reaches the transition guard.
+	f.exec(`INSERT INTO onboarding_documents (onboarding_id,document_type,s3_key,upload_status)
+		SELECT $1::uuid,document_type,'legacy/' || $1 || '/' || document_type,'uploaded'
+		FROM onboarding_documents WHERE onboarding_id=$2::uuid`, id, f.application.OnboardingID)
+	return id
+}
+
+func (f *onboardingFixture) assertLegacyUnchanged(id, status string) {
+	f.t.Helper()
+	var got struct {
+		Status string `db:"status"`
+		Reason string `db:"rejection_reason"`
+		Audits int    `db:"audits"`
+	}
+	f.get(&got, `SELECT status,rejection_reason,
+		(SELECT COUNT(*) FROM audit_logs WHERE entity_type='onboardings' AND entity_id=$1) AS audits
+		FROM onboardings WHERE onboarding_id=$1::uuid`, id)
+	if got.Status != status || got.Reason != "Legacy feedback" || got.Audits != 0 {
+		f.t.Fatalf("obsolete application changed: %+v, want status=%s, original feedback, no audits", got, status)
+	}
 }
 
 func (f *onboardingFixture) init() {

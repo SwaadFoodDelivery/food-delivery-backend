@@ -6,6 +6,7 @@ on:
       - main
       - codex/vert-001-catalog
       - codex/serviceability-policy
+      - codex/payment-delivery-gate
     paths-ignore:
       - "**/.env"
       - "**/.env.*"
