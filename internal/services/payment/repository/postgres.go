@@ -91,6 +91,29 @@ func (r *PostgresRepository) CreatePending(ctx context.Context, payment models.P
 	if status == "cancelled" || status == "rejected" || status == "delivered" {
 		return models.Payment{}, false, ErrOrderNotPayable
 	}
+	// The mock provider has no external financial side effects. Abandon an
+	// interrupted mock attempt after one minute so a NEW key can retry. Never
+	// apply this policy to real providers: uncertain charges need reconciliation.
+	// Complete's pending-only transition prevents a late request from reviving it.
+	if _, err := tx.ExecContext(ctx, `UPDATE payments SET status='failed',
+		failure_code='PAYMENT_INTERRUPTED', failure_message='Mock payment interrupted; retry with a new idempotency key', updated_at=NOW()
+		WHERE order_id=$1 AND order_created_at=$2 AND provider='mock' AND status='pending'
+		AND updated_at < NOW() - INTERVAL '1 minute'`, payment.OrderID, payment.CreatedAt); err != nil {
+		return models.Payment{}, false, err
+	}
+	// Preserve the outcome and order binding of a reused key, including a key
+	// whose pending attempt just expired. It must not silently initiate a charge.
+	var keyed paymentRow
+	err = tx.GetContext(ctx, &keyed, paymentSelect+` WHERE p.idempotency_key=$1`, strings.TrimSpace(key))
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return models.Payment{}, false, err
+		}
+		return mapPayment(keyed), true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return models.Payment{}, false, err
+	}
 	var previous paymentRow
 	err = tx.GetContext(ctx, &previous, paymentSelect+` WHERE p.order_id=$1 AND p.order_created_at=$2
 		AND p.status IN ('pending','success') ORDER BY p.created_at DESC LIMIT 1`, payment.OrderID, payment.CreatedAt)

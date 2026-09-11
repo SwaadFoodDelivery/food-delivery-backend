@@ -205,6 +205,73 @@ func TestPaymentDeliveryGatePostgres(t *testing.T) {
 	if err != nil || !replay || again.PaymentID != paymentID || again.Status != paymentmodels.StatusSuccess {
 		t.Fatalf("lost response retry=%+v replay=%v err=%v", again, replay, err)
 	}
+	t.Run("interrupted mock attempt expires without reviving or duplicating it", func(t *testing.T) {
+		orderID, orderCreated := newOrder("upi")
+		in := paymentmodels.Payment{OrderID: orderID, CreatedAt: orderCreated, UserID: input.UserID, Amount: 13600, Provider: "mock"}
+		key := uuid.NewString()
+		old, _, err := payments.CreatePending(ctx, in, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Fresh pending work is still protected against another charge.
+		fresh, replay, err := payments.CreatePending(ctx, in, uuid.NewString())
+		if err != nil || !replay || fresh.PaymentID != old.PaymentID || fresh.Status != paymentmodels.StatusPending {
+			t.Fatalf("fresh pending attempt lost: %+v replay=%v err=%v", fresh, replay, err)
+		}
+		exec(`UPDATE payments SET updated_at=NOW()-INTERVAL '2 minutes' WHERE payment_id=$1`, old.PaymentID)
+		expired, replay, err := payments.CreatePending(ctx, in, key)
+		if err != nil || !replay || expired.PaymentID != old.PaymentID || expired.FailureCode != "PAYMENT_INTERRUPTED" || expired.Status != paymentmodels.StatusFailed {
+			t.Fatalf("expired key changed identity/outcome: %+v replay=%v err=%v", expired, replay, err)
+		}
+		// A delayed original completion cannot overwrite the expired outcome.
+		late, err := payments.Complete(ctx, old.PaymentID, paymentmodels.StatusSuccess, "late_mock", "", "")
+		if err != nil || late.Status != paymentmodels.StatusFailed {
+			t.Fatalf("late completion revived abandoned attempt: %+v %v", late, err)
+		}
+		results := make(chan attempt, 8)
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				p, replay, err := payments.CreatePending(ctx, in, uuid.NewString())
+				results <- attempt{p, replay, err}
+			}()
+		}
+		wg.Wait()
+		close(results)
+		created := 0
+		var next uuid.UUID
+		for result := range results {
+			if result.err != nil || result.payment.Status != paymentmodels.StatusPending || result.payment.PaymentID == old.PaymentID {
+				t.Fatalf("recovery=%+v", result)
+			}
+			if !result.replay {
+				created++
+			}
+			if next == uuid.Nil {
+				next = result.payment.PaymentID
+			}
+			if result.payment.PaymentID != next {
+				t.Fatal("recovery created duplicate attempts")
+			}
+		}
+		if created != 1 {
+			t.Fatalf("created %d recovery attempts", created)
+		}
+	})
+	t.Run("non-mock pending attempts are never guessed failed", func(t *testing.T) {
+		orderID, orderCreated := newOrder("upi")
+		in := paymentmodels.Payment{OrderID: orderID, CreatedAt: orderCreated, UserID: input.UserID, Amount: 13600, Provider: "requires-reconciliation"}
+		old, _, err := payments.CreatePending(ctx, in, uuid.NewString())
+		if err != nil {
+			t.Fatal(err)
+		}
+		exec(`UPDATE payments SET updated_at=NOW()-INTERVAL '2 minutes' WHERE payment_id=$1`, old.PaymentID)
+		again, replay, err := payments.CreatePending(ctx, in, uuid.NewString())
+		if err != nil || !replay || again.Status != paymentmodels.StatusPending || again.PaymentID != old.PaymentID {
+			t.Fatalf("unsafe expiry of non-mock payment: %+v replay=%v err=%v", again, replay, err)
+		}
+	})
 	// Only generated test orders are removed, never the seed or dev records.
 	for _, orderID := range []uuid.UUID{id, cod, cancelled} {
 		exec(`DELETE FROM payments WHERE order_id=$1`, orderID)

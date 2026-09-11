@@ -7,12 +7,52 @@ import (
 	"time"
 
 	"food-delivery-backend/internal/services/payment/models"
+	"food-delivery-backend/internal/services/payment/repository"
 	"github.com/google/uuid"
 )
 
 type recordingDelivery struct {
 	calls int
 	err   error
+}
+
+type interruptedRepository struct {
+	repository.Repository
+	checked        bool
+	lateCompletion bool
+}
+
+func (r *interruptedRepository) CreatePending(ctx context.Context, p models.Payment, key string) (models.Payment, bool, error) {
+	r.checked = true
+	if r.lateCompletion {
+		return r.Repository.CreatePending(ctx, p, key)
+	}
+	p.Status, p.FailureCode = models.StatusFailed, "PAYMENT_INTERRUPTED"
+	return p, true, nil
+}
+
+func (r *interruptedRepository) Complete(ctx context.Context, id uuid.UUID, status, providerID, code, message string) (models.Payment, error) {
+	if r.lateCompletion {
+		status, code = models.StatusFailed, "PAYMENT_INTERRUPTED"
+	}
+	return r.Repository.Complete(ctx, id, status, providerID, code, message)
+}
+
+func TestInterruptedPaymentsAreNotReportedSuccessful(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same key consults expiry", true: "late completion"}[late], func(t *testing.T) {
+			userID, orderID := uuid.New(), uuid.New()
+			base := &fakeRepository{order: models.Order{OrderID: orderID, UserID: userID, TotalAmount: 10000, PaymentMethod: "upi"},
+				found: !late, known: models.Payment{OrderID: orderID, Status: models.StatusPending}}
+			r := &interruptedRepository{Repository: base, lateCompletion: late}
+			d := &recordingDelivery{}
+			out, _, err := NewService(r, NewMockProvider(), d).Pay(context.Background(), Input{UserID: userID.String(), OrderID: orderID.String(), IdempotencyKey: "interrupted"})
+			var se *ServiceError
+			if !r.checked || !errors.As(err, &se) || se.StatusCode != 402 || out.Status != models.StatusFailed || d.calls != 0 {
+				t.Fatalf("interrupted result=%+v err=%v checked=%v deliveries=%d", out, err, r.checked, d.calls)
+			}
+		})
+	}
 }
 
 func (d *recordingDelivery) EnsureForOrder(context.Context, uuid.UUID, time.Time) error {

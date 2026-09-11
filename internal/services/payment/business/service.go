@@ -89,14 +89,15 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 		if existing.OrderID != orderID {
 			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "IDEMPOTENCY_CONFLICT", Message: "payment idempotency key belongs to another order"}
 		}
-		if existing.Status == models.StatusPending {
-			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "PAYMENT_IN_PROGRESS", Message: "payment is already in progress"}
-		}
 		if existing.Status == models.StatusFailed {
 			return existing, true, &ServiceError{StatusCode: 402, Code: existing.FailureCode, Message: "payment was declined"}
 		}
-		s.schedulePaid(ctx, order, existing)
-		return existing, true, nil
+		if existing.Status == models.StatusSuccess {
+			s.schedulePaid(ctx, order, existing)
+			return existing, true, nil
+		}
+		// Pending attempts pass through the repository's serialized mock expiry
+		// policy, including retries using the original key after an interruption.
 	}
 	pending, replay, err := s.repo.CreatePending(ctx, models.Payment{OrderID: order.OrderID, CreatedAt: order.CreatedAt, UserID: userID, Amount: order.TotalAmount, Provider: "mock"}, key)
 	if err != nil {
@@ -110,7 +111,7 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "IDEMPOTENCY_CONFLICT", Message: "payment idempotency key belongs to another order"}
 		}
 		if pending.Status == models.StatusPending {
-			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "PAYMENT_IN_PROGRESS", Message: "payment is already in progress"}
+			return models.Payment{}, false, &ServiceError{StatusCode: 409, Code: "PAYMENT_IN_PROGRESS", Message: "payment is in progress; retry after one minute or cancel the saved demo order"}
 		}
 		if pending.Status == models.StatusFailed {
 			return pending, true, &ServiceError{StatusCode: 402, Code: pending.FailureCode, Message: "payment was declined"}
@@ -133,6 +134,9 @@ func (s *service) Pay(ctx context.Context, in Input) (models.Payment, bool, erro
 	completed, err := s.repo.Complete(ctx, pending.PaymentID, models.StatusSuccess, charge.ProviderPaymentID, "", "")
 	if err != nil {
 		return models.Payment{}, false, err
+	}
+	if completed.Status != models.StatusSuccess {
+		return completed, false, &ServiceError{StatusCode: 402, Code: completed.FailureCode, Message: "mock payment was interrupted; please retry"}
 	}
 	s.schedulePaid(ctx, order, completed)
 	return completed, false, nil
