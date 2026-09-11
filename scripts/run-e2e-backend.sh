@@ -6,6 +6,9 @@ set -euo pipefail
 # README. This command runs migrations automatically but never resets a database.
 cd "$(dirname "$0")/.."
 export APP_ENV=development APP_PORT=18080
+# All browser personas share loopback in this owned test process. Keep a
+# bounded global limit; route/user limits and application defaults are unchanged.
+export RATE_LIMIT_DEFAULT_PER_MIN=300
 export POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5432 POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres POSTGRES_DB=swaad_e2e_20260911 POSTGRES_SSLMODE=disable
 export REDIS_ADDR=127.0.0.1:16379 NATS_URL=nats://127.0.0.1:14222 NATS_CLIENT_ID=swaad-e2e
