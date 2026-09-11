@@ -6,6 +6,7 @@ import (
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/restaurant/business"
 	"food-delivery-backend/internal/services/restaurant/repository"
+	userrepository "food-delivery-backend/internal/services/users/repository/repository"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,13 +20,14 @@ func RegisterRoutes(v1Public *gin.RouterGroup, deps *app.Container) {
 
 func RegisterOwnerRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	h := newOwnerHandler(business.NewOwnerService(repository.NewPostgresRepository(deps.DB)))
-	restaurants := v1Protected.Group("/restaurants/:restaurantId/menu", middleware.RequireRole(constants.RoleRestaurantOwner))
+	approved := middleware.RequireApprovedOnboarding(userrepository.NewRepository(deps.DB, deps.Redis))
+	restaurants := v1Protected.Group("/restaurants/:restaurantId/menu", middleware.RequireRole(constants.RoleRestaurantOwner), approved)
 	restaurants.POST("/categories/:categoryId/items", h.CreateItem)
 	restaurants.PUT("/items/:itemId", h.UpdateItem)
 	restaurants.DELETE("/items/:itemId", h.DeleteItem)
-	orders := v1Protected.Group("/restaurants/:restaurantId", middleware.RequireRole(constants.RoleRestaurantOwner))
+	orders := v1Protected.Group("/restaurants/:restaurantId", middleware.RequireRole(constants.RoleRestaurantOwner), approved)
 	orders.GET("/orders", h.ListOrders)
 	orders.PATCH("/orders/:orderId/status", h.UpdateOrderStatus)
-	owned := v1Protected.Group("/owner", middleware.RequireRole(constants.RoleRestaurantOwner))
+	owned := v1Protected.Group("/owner", middleware.RequireRole(constants.RoleRestaurantOwner), approved)
 	owned.GET("/restaurant", h.GetOwnedRestaurant)
 }

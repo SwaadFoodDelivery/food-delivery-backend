@@ -81,7 +81,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run migration and seed smoke test
+      - name: Run migration smoke and onboarding security integration tests
         env:
           MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
-        run: go test ./infra/postgres -run TestMigrationsAndDemoSeed -count=1 -v
+          ONBOARDING_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
+        run: |
+          go test -race ./infra/postgres -run 'TestMigrationsAndDemoSeed|TestOnboardingApprovalMigration28' -count=1 -v
+          go test -race ./internal/services/users/business -run TestOnboardingIntegration -count=1 -v

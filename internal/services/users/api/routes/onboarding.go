@@ -33,7 +33,7 @@ func RegisterOnboardingRoutes(v1Public *gin.RouterGroup, v1Protected *gin.Router
 	)
 	resubmit.POST("", h.Resubmit)
 
-	callback := v1Public.Group("/onboarding/documents/uploaded",
+	callback := onboarding.Group("/documents/uploaded",
 		middleware.RequestValidator([]string{"s3_key"}, validations.ValidateDocumentUploadedBody),
 	)
 	callback.POST("", h.MarkUploaded)

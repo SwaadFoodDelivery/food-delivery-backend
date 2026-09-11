@@ -23,6 +23,7 @@ type CreateOnboardingDocumentInput struct {
 }
 
 type UpdateOnboardingStatusInput struct {
+	ExpectedStatus  string
 	OnboardingID    string
 	Status          string
 	RejectionReason *string
@@ -80,11 +81,15 @@ func (r *repo) CountPendingOnboardingDocuments(ctx context.Context, onboardingID
 }
 
 func (r *repo) UpdateOnboardingStatus(ctx context.Context, in UpdateOnboardingStatusInput) error {
-	return r.pg.UpdateOnboardingStatus(ctx, in.OnboardingID, in.Status, in.RejectionReason)
+	return r.pg.UpdateOnboardingStatus(ctx, in.OnboardingID, in.ExpectedStatus, in.Status, in.RejectionReason)
 }
 
-func (r *repo) MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, s3Key string) (bool, error) {
-	return r.pg.MarkOnboardingDocumentUploadedByS3Key(ctx, s3Key)
+func (r *repo) FindUploadableOnboardingDocument(ctx context.Context, userID, s3Key string) (*models.OnboardingDocumentRow, error) {
+	return r.pg.FindUploadableOnboardingDocument(ctx, userID, s3Key)
+}
+
+func (r *repo) MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, userID, s3Key string) (bool, error) {
+	return r.pg.MarkOnboardingDocumentUploadedByS3Key(ctx, userID, s3Key)
 }
 
 func (r *repo) SetUserOnboardingComplete(ctx context.Context, userID string, isComplete bool) error {

@@ -90,7 +90,8 @@ func (h *OnboardingHandler) MarkUploaded(c *gin.Context) {
 		return
 	}
 
-	svcErr := h.svc.MarkDocumentUploaded(c.Request.Context(), models.MarkDocumentUploadedInput{S3Key: strings.TrimSpace(body["s3_key"])})
+	userID, _ := c.Get(constants.AuthContextUserIDKey)
+	svcErr := h.svc.MarkDocumentUploaded(c.Request.Context(), models.MarkDocumentUploadedInput{UserID: strings.TrimSpace(toString(userID)), S3Key: strings.TrimSpace(body["s3_key"])})
 	if svcErr != nil {
 		writeServiceError(c, svcErr)
 		return

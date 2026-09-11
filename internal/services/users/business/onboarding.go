@@ -59,6 +59,9 @@ func (s *Service) ReviewOnboarding(ctx context.Context, in models.ReviewOnboardi
 		if errors.Is(err, repository.ErrOnboardingAlreadyReviewed) {
 			return nil, badRequest(apperrors.CodeValidation, "onboarding has already been reviewed")
 		}
+		if errors.Is(err, repository.ErrOnboardingStateConflict) {
+			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeOnboardingUploadsIncomplete, Message: "onboarding documents are incomplete", Details: []string{}}
+		}
 		return nil, internalErr("failed to review onboarding")
 	}
 	message := "Onboarding approved"
@@ -84,6 +87,9 @@ func (s *Service) InitOnboarding(ctx context.Context, in models.InitOnboardingIn
 	onboarding, pendingDocs, svcErr := s.createOnboardingDraft(ctx, input, docDefs)
 	if svcErr != nil {
 		return nil, svcErr
+	}
+	if onboarding.Status != constants.OnboardingStatusDraft {
+		return &models.InitOnboardingOutput{OnboardingID: onboarding.OnboardingID, Status: onboarding.Status, Role: onboarding.Role, RejectionReason: onboarding.RejectionReason.String, Documents: []models.OnboardingDocumentUpload{}}, nil
 	}
 	outDocs, svcErr := s.buildPresignedUploads(ctx, bucket, pendingDocs)
 	if svcErr != nil {
@@ -111,6 +117,9 @@ func (s *Service) SubmitOnboarding(ctx context.Context, in models.SubmitOnboardi
 	if onboarding.Status == constants.OnboardingStatusPendingVerification {
 		return nil, badRequest(apperrors.CodeOnboardingAlreadySubmitted, "onboarding already submitted for verification")
 	}
+	if onboarding.Status != constants.OnboardingStatusDraft {
+		return nil, badRequest(apperrors.CodeValidation, "move rejected onboarding to draft before submitting")
+	}
 
 	incompleteCount, err := s.repo.CountPendingOnboardingDocuments(ctx, onboarding.OnboardingID)
 	if err != nil {
@@ -122,20 +131,15 @@ func (s *Service) SubmitOnboarding(ctx context.Context, in models.SubmitOnboardi
 
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		if txErr := tx.UpdateOnboardingStatus(ctx, repository.UpdateOnboardingStatusInput{
+			ExpectedStatus:  constants.OnboardingStatusDraft,
 			OnboardingID:    onboarding.OnboardingID,
 			Status:          constants.OnboardingStatusPendingVerification,
 			RejectionReason: nil,
 		}); txErr != nil {
 			return txErr
 		}
-		// Submission is the last user-facing step today (there is no admin
-		// approve/reject endpoint yet), so this is where the account leaves
-		// "first-time" status. RequireOnboardingAccess reads this same flag;
-		// without setting it here a user could re-init and re-submit forever.
-		// NOTE: a future reject workflow must set this back to false (see
-		// ResubmitOnboarding below), or a rejected user would be locked out of
-		// resubmitting by this same gate.
-		if txErr := tx.SetUserOnboardingComplete(ctx, userID, true); txErr != nil {
+		// Only a successful review grants approval; submission stays pending.
+		if txErr := tx.SetUserOnboardingComplete(ctx, userID, false); txErr != nil {
 			return txErr
 		}
 		return tx.InsertAuditLog(ctx, repository.AuditLogInput{
@@ -147,6 +151,9 @@ func (s *Service) SubmitOnboarding(ctx context.Context, in models.SubmitOnboardi
 		})
 	})
 	if err != nil {
+		if errors.Is(err, repository.ErrOnboardingStateConflict) {
+			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeValidation, Message: "onboarding state changed or documents are incomplete; reload and retry", Details: []string{}}
+		}
 		return nil, internalErr("failed to submit onboarding")
 	}
 
@@ -175,15 +182,14 @@ func (s *Service) ResubmitOnboarding(ctx context.Context, in models.ResubmitOnbo
 
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		if txErr := tx.UpdateOnboardingStatus(ctx, repository.UpdateOnboardingStatusInput{
+			ExpectedStatus:  constants.OnboardingStatusRejected,
 			OnboardingID:    onboarding.OnboardingID,
 			Status:          constants.OnboardingStatusDraft,
 			RejectionReason: nil,
 		}); txErr != nil {
 			return txErr
 		}
-		// Mirrors the flag flip in SubmitOnboarding: a rejected onboarding needs
-		// the user back in the flow, so RequireOnboardingAccess must let them
-		// through again.
+		// Reopening a rejected application does not confer approval.
 		if txErr := tx.SetUserOnboardingComplete(ctx, userID, false); txErr != nil {
 			return txErr
 		}
@@ -196,6 +202,9 @@ func (s *Service) ResubmitOnboarding(ctx context.Context, in models.ResubmitOnbo
 		})
 	})
 	if err != nil {
+		if errors.Is(err, repository.ErrOnboardingStateConflict) {
+			return nil, &models.ServiceError{StatusCode: http.StatusConflict, Code: apperrors.CodeValidation, Message: "onboarding state changed; reload and retry", Details: []string{}}
+		}
 		return nil, internalErr("failed to resubmit onboarding")
 	}
 
@@ -207,11 +216,34 @@ func (s *Service) ResubmitOnboarding(ctx context.Context, in models.ResubmitOnbo
 }
 
 func (s *Service) MarkDocumentUploaded(ctx context.Context, in models.MarkDocumentUploadedInput) *models.ServiceError {
+	userID := strings.TrimSpace(in.UserID)
+	if userID == "" {
+		return &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeUnauthorized, Message: "authentication required", Details: []string{}}
+	}
 	s3Key, details := validations.ValidateS3Key(in.S3Key)
 	if len(details) > 0 {
 		return badRequest(apperrors.CodeValidation, details[0])
 	}
-	updated, err := s.repo.MarkOnboardingDocumentUploadedByS3Key(ctx, s3Key)
+	// Check database ownership before accessing storage: knowing another
+	// applicant's object key must reveal neither its existence nor its state.
+	if _, err := s.repo.FindUploadableOnboardingDocument(ctx, userID, s3Key); err != nil {
+		if repository.IsNotFound(err) {
+			return &models.ServiceError{StatusCode: http.StatusNotFound, Code: apperrors.CodeOnboardingDocumentNotFound, Message: "editable document not found", Details: []string{}}
+		}
+		return internalErr("failed to load document")
+	}
+	bucket, svcErr := s.validateOnboardingStorage()
+	if svcErr != nil {
+		return svcErr
+	}
+	exists, err := s.storageProvider.ObjectExists(ctx, bucket, s3Key)
+	if err != nil {
+		return internalErr("failed to verify uploaded object")
+	}
+	if !exists {
+		return &models.ServiceError{StatusCode: http.StatusPreconditionFailed, Code: apperrors.CodeOnboardingUploadsIncomplete, Message: "upload the document before confirming it", Details: []string{}}
+	}
+	updated, err := s.repo.MarkOnboardingDocumentUploadedByS3Key(ctx, userID, s3Key)
 	if err != nil {
 		return internalErr("failed to update document upload status")
 	}
@@ -263,6 +295,9 @@ func (s *Service) createOnboardingDraft(ctx context.Context, in models.InitOnboa
 			return txErr
 		}
 		onboarding = created
+		if created.Status != constants.OnboardingStatusDraft {
+			return nil
+		}
 		for _, def := range docDefs {
 			s3Key := fmt.Sprintf("users/%s/onboarding/%s/%s", in.UserID, created.OnboardingID, def.DocumentType)
 			doc, createErr := tx.CreateOnboardingDocument(ctx, repository.CreateOnboardingDocumentInput{OnboardingID: created.OnboardingID, DocumentType: def.DocumentType, S3Key: s3Key, UploadStatus: constants.OnboardingUploadStatusPending})
