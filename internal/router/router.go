@@ -5,7 +5,14 @@ import (
 
 	"food-delivery-backend/internal/app"
 	"food-delivery-backend/internal/middleware"
+	cartroutes "food-delivery-backend/internal/services/cart/api"
 	commonroutes "food-delivery-backend/internal/services/common/api/routes"
+	deliveryroutes "food-delivery-backend/internal/services/delivery/api"
+	notificationroutes "food-delivery-backend/internal/services/notification/api"
+	operationsroutes "food-delivery-backend/internal/services/operations/api"
+	orderroutes "food-delivery-backend/internal/services/order/api"
+	paymentroutes "food-delivery-backend/internal/services/payment/api"
+	restaurantroutes "food-delivery-backend/internal/services/restaurant/api"
 	usersroutes "food-delivery-backend/internal/services/users/api/routes"
 	"food-delivery-backend/pkg/response"
 
@@ -25,6 +32,14 @@ func NewRouter(deps *app.Container) *gin.Engine {
 	protected.GET("/me", func(c *gin.Context) { response.Success(c, http.StatusOK, gin.H{"authenticated": true}) })
 
 	commonroutes.RegisterRoutes(public, protected, deps)
+	cartroutes.RegisterRoutes(protected, deps)
+	orderroutes.RegisterRoutes(protected, deps)
+	operationsroutes.RegisterRoutes(protected, deps)
+	notificationroutes.RegisterRoutes(protected, deps)
+	deliveryroutes.RegisterRoutes(protected, deps)
+	paymentroutes.RegisterRoutes(protected, deps)
+	restaurantroutes.RegisterRoutes(public, deps)
+	restaurantroutes.RegisterOwnerRoutes(protected, deps)
 	usersroutes.RegisterRoutes(public, protected, deps)
 	return r
 }

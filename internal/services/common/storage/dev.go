@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"sort"
@@ -32,6 +33,24 @@ func NewDevProvider(accessKey, secretKey, region, endpoint, presignBaseURL strin
 }
 
 func (d *DevProvider) PresignPut(_ context.Context, in PresignPutInput) (*PresignPutOutput, error) {
+	signingEndpoint := d.endpoint
+	if d.presignBaseURL != "" {
+		signingEndpoint = d.presignBaseURL
+	}
+	return d.presign(http.MethodPut, signingEndpoint, in)
+}
+
+func (d *DevProvider) ObjectExists(ctx context.Context, bucket, key string) (bool, error) {
+	signed, err := d.presign(http.MethodHead, d.endpoint, PresignPutInput{
+		Bucket: bucket, Key: key, ExpiresIn: time.Minute,
+	})
+	if err != nil {
+		return false, err
+	}
+	return objectExists(ctx, signed.URL)
+}
+
+func (d *DevProvider) presign(method, signingEndpoint string, in PresignPutInput) (*PresignPutOutput, error) {
 	if d.accessKey == "" || d.secretKey == "" || d.region == "" {
 		return nil, fmt.Errorf("s3 dev provider is not configured")
 	}
@@ -54,13 +73,23 @@ func (d *DevProvider) PresignPut(_ context.Context, in PresignPutInput) (*Presig
 	dateStamp := now.Format("20060102")
 	credentialScope := dateStamp + "/" + d.region + "/s3/aws4_request"
 
-	signingEndpoint := d.endpoint
-	if d.presignBaseURL != "" {
-		signingEndpoint = d.presignBaseURL
-	}
 	host, scheme, canonicalURI, err := hostAndURI(signingEndpoint, d.region, bucket, key)
 	if err != nil {
 		return nil, err
+	}
+	if method == http.MethodHead {
+		// S3 object paths must not be normalized. Encode every non-unreserved
+		// byte except slashes, including '+' which url.PathEscape leaves intact.
+		objectPath := "/" + key
+		if signingEndpoint != "" {
+			u, _ := url.Parse(signingEndpoint) // Already parsed by hostAndURI.
+			objectPath = strings.TrimSuffix(u.Path, "/") + "/" + bucket + objectPath
+		}
+		parts := strings.Split(objectPath, "/")
+		for i := range parts {
+			parts[i] = strings.ReplaceAll(url.QueryEscape(parts[i]), "+", "%20")
+		}
+		canonicalURI = strings.Join(parts, "/")
 	}
 
 	signedHeaderNames := []string{"host"}
@@ -83,9 +112,12 @@ func (d *DevProvider) PresignPut(_ context.Context, in PresignPutInput) (*Presig
 		"X-Amz-SignedHeaders": signedHeaders,
 	}
 	canonicalQuery := canonicalizeQuery(params)
+	if method == http.MethodHead {
+		canonicalQuery = strings.ReplaceAll(canonicalQuery, "+", "%20")
+	}
 	payloadHash := "UNSIGNED-PAYLOAD"
 	canonicalRequest := strings.Join([]string{
-		"PUT",
+		method,
 		canonicalURI,
 		canonicalQuery,
 		canonicalHeaders,
@@ -114,7 +146,7 @@ func (d *DevProvider) PresignPut(_ context.Context, in PresignPutInput) (*Presig
 
 	return &PresignPutOutput{
 		URL:       presignedURL,
-		Method:    "PUT",
+		Method:    method,
 		Headers:   outputHeaders,
 		ExpiresAt: now.Add(time.Duration(expires) * time.Second),
 	}, nil

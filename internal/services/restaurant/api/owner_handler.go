@@ -1,0 +1,215 @@
+package api
+
+import (
+	"database/sql"
+	"errors"
+	"net/http"
+	"strings"
+
+	"food-delivery-backend/internal/constants"
+	"food-delivery-backend/internal/services/restaurant/business"
+	"food-delivery-backend/internal/services/restaurant/models"
+	"food-delivery-backend/pkg/response"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+type ownerHandler struct{ svc business.OwnerService }
+
+type itemMutationRequest struct {
+	Name               string   `json:"name" binding:"required"`
+	Description        string   `json:"description"`
+	Price              int64    `json:"price_minor" binding:"required"`
+	ImageURL           string   `json:"image_url"`
+	IsVeg              bool     `json:"is_veg"`
+	IsAvailable        bool     `json:"is_available"`
+	PreparationTimeMin int      `json:"preparation_time_min"`
+	Tags               []string `json:"tags"`
+}
+
+type orderStatusRequest struct {
+	Status string `json:"status" binding:"required"`
+}
+
+func newOwnerHandler(svc business.OwnerService) *ownerHandler { return &ownerHandler{svc: svc} }
+
+func (h *ownerHandler) GetOwnedRestaurant(c *gin.Context) {
+	actorID, ok := ownerActorID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "INVALID_TOKEN", "invalid user identity", []string{})
+		return
+	}
+	out, err := h.svc.GetOwnedRestaurant(c.Request.Context(), actorID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(c, http.StatusNotFound, "RESTAURANT_NOT_FOUND", "owned restaurant not found", []string{})
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, "RESTAURANT_LOOKUP_FAILED", "owned restaurant could not be loaded", []string{})
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
+func (h *ownerHandler) CreateItem(c *gin.Context) {
+	actorID, restaurantID, categoryID, ok := ownerIDs(c, true)
+	if !ok {
+		return
+	}
+	var req itemMutationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_MENU_ITEM", "invalid menu item", []string{})
+		return
+	}
+	out, err := h.svc.CreateItem(c.Request.Context(), actorID, restaurantID, categoryID, req.model())
+	if err != nil {
+		ownerError(c, err)
+		return
+	}
+	response.Success(c, http.StatusCreated, out)
+}
+
+func (h *ownerHandler) UpdateItem(c *gin.Context) {
+	actorID, restaurantID, itemID, ok := ownerIDs(c, false)
+	if !ok {
+		return
+	}
+	var req itemMutationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_MENU_ITEM", "invalid menu item", []string{})
+		return
+	}
+	out, err := h.svc.UpdateItem(c.Request.Context(), actorID, restaurantID, itemID, req.model())
+	if err != nil {
+		ownerError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
+func (h *ownerHandler) DeleteItem(c *gin.Context) {
+	actorID, restaurantID, itemID, ok := ownerIDs(c, false)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteItem(c.Request.Context(), actorID, restaurantID, itemID); err != nil {
+		ownerError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+func (h *ownerHandler) ListOrders(c *gin.Context) {
+	actorID, restaurantID, ok := ownerRestaurantIDs(c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.ListOrders(c.Request.Context(), actorID, restaurantID)
+	if err != nil {
+		orderError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"orders": out})
+}
+
+func (h *ownerHandler) UpdateOrderStatus(c *gin.Context) {
+	actorID, restaurantID, ok := ownerRestaurantIDs(c)
+	if !ok {
+		return
+	}
+	orderID, err := uuid.Parse(c.Param("orderId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_ORDER_ID", "orderId must be a UUID", []string{})
+		return
+	}
+	var req orderStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_ORDER_STATUS", "status is required", []string{})
+		return
+	}
+	out, err := h.svc.UpdateOrderStatus(c.Request.Context(), actorID, restaurantID, orderID, req.Status)
+	if err != nil {
+		orderError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
+func (r itemMutationRequest) model() models.Item {
+	return models.Item{Name: strings.TrimSpace(r.Name), Description: strings.TrimSpace(r.Description), Price: r.Price, ImageURL: strings.TrimSpace(r.ImageURL), IsVeg: r.IsVeg, IsAvailable: r.IsAvailable, PreparationTimeMin: r.PreparationTimeMin, Tags: r.Tags}
+}
+
+func ownerIDs(c *gin.Context, needsCategory bool) (uuid.UUID, uuid.UUID, uuid.UUID, bool) {
+	actorID, restaurantID, ok := ownerRestaurantIDs(c)
+	if !ok {
+		return uuid.Nil, uuid.Nil, uuid.Nil, false
+	}
+	if !needsCategory {
+		itemID, err := uuid.Parse(c.Param("itemId"))
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "INVALID_ITEM_ID", "itemId must be a UUID", []string{})
+			return uuid.Nil, uuid.Nil, uuid.Nil, false
+		}
+		return actorID, restaurantID, itemID, true
+	}
+	categoryID, err := uuid.Parse(c.Param("categoryId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_CATEGORY_ID", "categoryId must be a UUID", []string{})
+		return uuid.Nil, uuid.Nil, uuid.Nil, false
+	}
+	return actorID, restaurantID, categoryID, true
+}
+
+func ownerRestaurantIDs(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
+	actorID, ok := ownerActorID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "INVALID_TOKEN", "invalid user identity", []string{})
+		return uuid.Nil, uuid.Nil, false
+	}
+	restaurantID, err := uuid.Parse(c.Param("restaurantId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "INVALID_RESTAURANT_ID", "restaurantId must be a UUID", []string{})
+		return uuid.Nil, uuid.Nil, false
+	}
+	return actorID, restaurantID, true
+}
+
+func ownerActorID(c *gin.Context) (uuid.UUID, bool) {
+	actorRaw, ok := c.Get(constants.AuthContextUserIDKey)
+	actorID, err := uuid.Parse(strings.TrimSpace(valueString(actorRaw)))
+	if !ok || err != nil {
+		return uuid.Nil, false
+	}
+	return actorID, true
+}
+
+func valueString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func ownerError(c *gin.Context, err error) {
+	if err == sql.ErrNoRows || strings.Contains(err.Error(), "not found") {
+		response.Error(c, http.StatusNotFound, "MENU_ITEM_NOT_FOUND", "menu item not found", []string{})
+		return
+	}
+	response.Error(c, http.StatusBadRequest, "INVALID_MENU_ITEM", err.Error(), []string{})
+}
+
+func orderError(c *gin.Context, err error) {
+	if strings.Contains(err.Error(), "order not found") {
+		response.Error(c, http.StatusNotFound, "ORDER_NOT_FOUND", "order not found", []string{})
+		return
+	}
+	if strings.Contains(err.Error(), "status must be") {
+		response.Error(c, http.StatusBadRequest, "INVALID_ORDER_STATUS", err.Error(), []string{})
+		return
+	}
+	if strings.Contains(err.Error(), "order cannot move") {
+		response.Error(c, http.StatusConflict, "INVALID_ORDER_TRANSITION", err.Error(), []string{})
+		return
+	}
+	response.Error(c, http.StatusInternalServerError, "ORDER_OPERATION_FAILED", "order operation failed", []string{})
+}

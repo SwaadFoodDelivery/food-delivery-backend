@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"time"
 
 	"food-delivery-backend/internal/errors"
@@ -12,6 +13,9 @@ import (
 	"github.com/jmoiron/sqlx"
 	rds "github.com/redis/go-redis/v9"
 )
+
+var ErrOnboardingAlreadyReviewed = stderrors.New("onboarding already reviewed")
+var ErrOnboardingStateConflict = postgresstore.ErrOnboardingStateConflict
 
 type Repository interface {
 	FindUserByPhoneAndRole(ctx context.Context, phone, role string) (*models.UserRow, error)
@@ -59,8 +63,11 @@ type Repository interface {
 	FindOnboardingByIDAndUser(ctx context.Context, onboardingID, userID string) (*models.OnboardingRow, error)
 	CountPendingOnboardingDocuments(ctx context.Context, onboardingID string) (int, error)
 	UpdateOnboardingStatus(ctx context.Context, in UpdateOnboardingStatusInput) error
-	MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, s3Key string) (bool, error)
+	FindUploadableOnboardingDocument(ctx context.Context, userID, s3Key string) (*models.OnboardingDocumentRow, error)
+	MarkOnboardingDocumentUploadedByS3Key(ctx context.Context, userID, s3Key string) (bool, error)
 	SetUserOnboardingComplete(ctx context.Context, userID string, isComplete bool) error
+	ListOnboardingReviews(ctx context.Context, status string) ([]models.OnboardingReviewItem, error)
+	ReviewOnboarding(ctx context.Context, in ReviewOnboardingInput) (*models.OnboardingReviewItem, error)
 
 	GetUserProfileByID(ctx context.Context, userID string) (*models.UserProfileRow, error)
 	GetClientProfileByUserID(ctx context.Context, userID string) (*models.ClientProfileRow, error)

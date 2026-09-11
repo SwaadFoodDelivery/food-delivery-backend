@@ -2,6 +2,7 @@ package routes
 
 import (
 	"food-delivery-backend/internal/app"
+	"food-delivery-backend/internal/constants"
 	"food-delivery-backend/internal/middleware"
 	"food-delivery-backend/internal/services/users/api/handler"
 	"food-delivery-backend/internal/services/users/business"
@@ -32,8 +33,12 @@ func RegisterOnboardingRoutes(v1Public *gin.RouterGroup, v1Protected *gin.Router
 	)
 	resubmit.POST("", h.Resubmit)
 
-	callback := v1Public.Group("/onboarding/documents/uploaded",
+	callback := onboarding.Group("/documents/uploaded",
 		middleware.RequestValidator([]string{"s3_key"}, validations.ValidateDocumentUploadedBody),
 	)
 	callback.POST("", h.MarkUploaded)
+
+	reviews := v1Protected.Group("/operations/onboarding", middleware.RequireRole(constants.RoleRestaurantManager))
+	reviews.GET("", h.ListReviews)
+	reviews.PATCH("/:id", h.Review)
 }

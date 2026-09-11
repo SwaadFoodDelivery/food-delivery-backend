@@ -1,0 +1,30 @@
+ALTER TABLE restaurants
+    ADD COLUMN IF NOT EXISTS address_line1 VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS address_line2 VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS area VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS city VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS state VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS pincode VARCHAR(10),
+    ADD COLUMN IF NOT EXISTS latitude DECIMAL(9,6),
+    ADD COLUMN IF NOT EXISTS longitude DECIMAL(9,6),
+    ADD COLUMN IF NOT EXISTS service_radius_km DECIMAL(5,2) NOT NULL DEFAULT 5.0,
+    ADD COLUMN IF NOT EXISTS delivery_time_min SMALLINT NOT NULL DEFAULT 30,
+    ADD COLUMN IF NOT EXISTS opening_cron VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS rating DECIMAL(3,2) NOT NULL DEFAULT 0 CHECK (rating BETWEEN 0 AND 5),
+    ADD COLUMN IF NOT EXISTS total_ratings INTEGER NOT NULL DEFAULT 0 CHECK (total_ratings >= 0),
+    ADD COLUMN IF NOT EXISTS description TEXT,
+    ADD COLUMN IF NOT EXISTS logo_s3_key VARCHAR(512);
+
+ALTER TABLE menu_items
+    ADD COLUMN IF NOT EXISTS description TEXT,
+    ADD COLUMN IF NOT EXISTS image_s3_key VARCHAR(512),
+    ADD COLUMN IF NOT EXISTS is_veg BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS preparation_time_min SMALLINT NOT NULL DEFAULT 15,
+    ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_restaurants_status_active ON restaurants(status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_restaurants_city ON restaurants(city);
+CREATE INDEX IF NOT EXISTS idx_menu_items_restaurant_available ON menu_items(restaurant_id, is_available) WHERE is_deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_menu_categories_menu_sort ON menu_categories(menu_id, sort_order);

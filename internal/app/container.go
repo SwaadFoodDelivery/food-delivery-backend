@@ -6,6 +6,7 @@ import (
 	"food-delivery-backend/internal/services/common/email"
 	"food-delivery-backend/internal/services/common/otp"
 	"food-delivery-backend/internal/services/common/storage"
+	deliverybusiness "food-delivery-backend/internal/services/delivery/business"
 	"food-delivery-backend/pkg/config"
 
 	"github.com/jmoiron/sqlx"
@@ -25,4 +26,5 @@ type Container struct {
 	OTPProvider     otp.Provider
 	EmailProvider   email.Provider
 	StorageProvider storage.Provider
+	DeliveryService deliverybusiness.Service
 }
