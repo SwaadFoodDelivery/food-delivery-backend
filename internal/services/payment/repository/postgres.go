@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,6 +77,55 @@ func (r *PostgresRepository) CreatePending(ctx context.Context, payment models.P
 		return models.Payment{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Different retry keys still represent the same payable order. Lock that
+	// order before checking prior attempts so concurrent requests cannot charge
+	// it twice, and a lost successful response is safely replayed.
+	var status string
+	if err := tx.GetContext(ctx, &status, `SELECT status::text FROM orders
+		WHERE order_id=$1 AND created_at=$2 AND user_id=$3 FOR UPDATE`, payment.OrderID, payment.CreatedAt, payment.UserID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.Payment{}, false, ErrOrderNotFound
+		}
+		return models.Payment{}, false, err
+	}
+	if status == "cancelled" || status == "rejected" || status == "delivered" {
+		return models.Payment{}, false, ErrOrderNotPayable
+	}
+	// The mock provider has no external financial side effects. Abandon an
+	// interrupted mock attempt after one minute so a NEW key can retry. Never
+	// apply this policy to real providers: uncertain charges need reconciliation.
+	// Complete's pending-only transition prevents a late request from reviving it.
+	if _, err := tx.ExecContext(ctx, `UPDATE payments SET status='failed',
+		failure_code='PAYMENT_INTERRUPTED', failure_message='Mock payment interrupted; retry with a new idempotency key', updated_at=NOW()
+		WHERE order_id=$1 AND order_created_at=$2 AND provider='mock' AND status='pending'
+		AND updated_at < NOW() - INTERVAL '1 minute'`, payment.OrderID, payment.CreatedAt); err != nil {
+		return models.Payment{}, false, err
+	}
+	// Preserve the outcome and order binding of a reused key, including a key
+	// whose pending attempt just expired. It must not silently initiate a charge.
+	var keyed paymentRow
+	err = tx.GetContext(ctx, &keyed, paymentSelect+` WHERE p.idempotency_key=$1`, strings.TrimSpace(key))
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return models.Payment{}, false, err
+		}
+		return mapPayment(keyed), true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return models.Payment{}, false, err
+	}
+	var previous paymentRow
+	err = tx.GetContext(ctx, &previous, paymentSelect+` WHERE p.order_id=$1 AND p.order_created_at=$2
+		AND p.status IN ('pending','success') ORDER BY p.created_at DESC LIMIT 1`, payment.OrderID, payment.CreatedAt)
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return models.Payment{}, false, err
+		}
+		return mapPayment(previous), true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return models.Payment{}, false, err
+	}
 
 	var paymentID uuid.UUID
 	err = tx.GetContext(ctx, &paymentID, `
@@ -165,13 +215,27 @@ func mapPayment(row paymentRow) models.Payment {
 func minorDecimal(minor int64) string { return fmt.Sprintf("%d.%02d", minor/100, minor%100) }
 
 func mustMinor(raw string) int64 {
-	var major int64
-	var fraction int64
-	if _, err := fmt.Sscanf(strings.TrimSpace(raw), "%d.%d", &major, &fraction); err != nil {
+	parts := strings.Split(strings.TrimSpace(raw), ".")
+	if len(parts) > 2 {
 		return 0
 	}
-	if fraction < 10 {
-		fraction *= 10
+	major, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || major < 0 {
+		return 0
+	}
+	fractionText := ""
+	if len(parts) == 2 {
+		fractionText = parts[1]
+	}
+	if len(fractionText) > 2 {
+		return 0
+	}
+	for len(fractionText) < 2 {
+		fractionText += "0"
+	}
+	fraction, err := strconv.ParseInt(fractionText, 10, 64)
+	if err != nil || fraction < 0 {
+		return 0
 	}
 	return major*100 + fraction
 }

@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrOrderNotFound       = errors.New("order not found")
+	ErrOrderNotPayable     = errors.New("order is not payable")
 	ErrPaymentNotFound     = errors.New("payment not found")
 	ErrPaymentInProgress   = errors.New("payment already in progress")
 	ErrIdempotencyConflict = errors.New("payment idempotency key belongs to another order")
