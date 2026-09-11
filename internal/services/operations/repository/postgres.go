@@ -74,7 +74,7 @@ func (r *PostgresRepository) GetOverview(ctx context.Context, status string) (mo
 			LIMIT 1
 		) active ON TRUE
 		WHERE u.role = 'driver' AND u.account_status = 'active' AND u.is_deleted = FALSE
-		ORDER BY u.name, u.user_id`, &driverRows); err != nil {
+		ORDER BY u.name, u.user_id`); err != nil {
 		return models.Overview{}, err
 	}
 

@@ -8,6 +8,7 @@ on:
       - codex/serviceability-policy
       - codex/payment-delivery-gate
       - codex/onboarding-serialization
+      - codex/persist-order-history
     paths-ignore:
       - "**/.env"
       - "**/.env.*"
@@ -92,7 +93,7 @@ jobs:
           ONBOARDING_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
           PAYMENT_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/food_delivery?sslmode=disable
         run: |
-          go test -race ./infra/postgres -run 'TestMigrationsAndDemoSeed|TestOnboardingApprovalMigration28' -count=1 -v
+          go test -race ./infra/postgres -run 'TestMigrationsAndDemoSeed|TestOnboardingApprovalMigration28|TestStatusHistoryMigration29' -count=1 -v
           go test -race ./internal/services/users/business -run TestOnboardingIntegration -count=1 -v
           go test -race ./internal/services/order/repository -run TestServiceabilityPostGIS -count=1 -v
           go test -race ./internal/services/delivery/repository -run TestPaymentDeliveryGatePostgres -count=1 -v
