@@ -22,7 +22,8 @@ type ResubmitOnboardingInput struct {
 }
 
 type MarkDocumentUploadedInput struct {
-	S3Key string
+	UserID string
+	S3Key  string
 }
 
 type OnboardingDocumentUpload struct {
@@ -36,10 +37,11 @@ type OnboardingDocumentUpload struct {
 }
 
 type InitOnboardingOutput struct {
-	OnboardingID string                     `json:"onboarding_id"`
-	Status       string                     `json:"status"`
-	Role         string                     `json:"role"`
-	Documents    []OnboardingDocumentUpload `json:"documents"`
+	RejectionReason string                     `json:"rejection_reason,omitempty"`
+	OnboardingID    string                     `json:"onboarding_id"`
+	Status          string                     `json:"status"`
+	Role            string                     `json:"role"`
+	Documents       []OnboardingDocumentUpload `json:"documents"`
 }
 
 type SubmitOnboardingOutput struct {
@@ -55,18 +57,18 @@ type ResubmitOnboardingOutput struct {
 }
 
 type OnboardingReviewItem struct {
-	OnboardingID    string    `json:"onboarding_id"`
-	UserID          string    `json:"user_id"`
-	UserName        string    `json:"user_name"`
-	Phone           string    `json:"phone"`
-	Email           string    `json:"email,omitempty"`
-	Role            string    `json:"role"`
-	Status          string    `json:"status"`
-	RejectionReason string    `json:"rejection_reason,omitempty"`
-	RequiredDocs    int       `json:"required_documents"`
-	UploadedDocs    int       `json:"uploaded_documents"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	OnboardingID    string    `json:"onboarding_id" db:"onboarding_id"`
+	UserID          string    `json:"user_id" db:"user_id"`
+	UserName        string    `json:"user_name" db:"user_name"`
+	Phone           string    `json:"phone" db:"phone"`
+	Email           string    `json:"email,omitempty" db:"email"`
+	Role            string    `json:"role" db:"role"`
+	Status          string    `json:"status" db:"status"`
+	RejectionReason string    `json:"rejection_reason,omitempty" db:"rejection_reason"`
+	RequiredDocs    int       `json:"required_documents" db:"required_documents"`
+	UploadedDocs    int       `json:"uploaded_documents" db:"uploaded_documents"`
+	CreatedAt       time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type ReviewOnboardingInput struct {
