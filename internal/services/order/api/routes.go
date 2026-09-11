@@ -17,6 +17,7 @@ func RegisterRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	h := NewHandler(svc)
 	orders := v1Protected.Group("/orders", middleware.LeakyBucketRateLimit(deps.Redis, "orders", 10.0/60.0, 10, 60, middleware.UserIDKeyFunc))
 	orders.POST("/quote", h.Quote)
+	orders.POST("/serviceability", h.Serviceability)
 	orders.POST("", h.Place)
 	orders.GET("", h.List)
 	orders.GET("/:orderId/history", h.History)

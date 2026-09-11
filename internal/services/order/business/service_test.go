@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	cartbusiness "food-delivery-backend/internal/services/cart/business"
@@ -26,6 +27,7 @@ func (f *fakeCartService) Clear(context.Context, cartbusiness.ClearInput) error 
 type fakeOrderRepository struct {
 	existing ordermodels.Order
 	found    bool
+	err      error
 }
 
 func (f fakeOrderRepository) Quote(context.Context, uuid.UUID, cartmodels.Cart, uuid.UUID) (ordermodels.Quote, error) {
@@ -36,6 +38,31 @@ func (f fakeOrderRepository) FindByIdempotency(context.Context, uuid.UUID, strin
 }
 func (f fakeOrderRepository) Place(context.Context, ordermodels.PlaceInput, cartmodels.Cart, ordermodels.Quote) (ordermodels.Order, bool, error) {
 	return ordermodels.Order{}, false, nil
+}
+func (f fakeOrderRepository) CheckServiceability(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (ordermodels.Serviceability, error) {
+	return ordermodels.Serviceability{}, f.err
+}
+
+func TestServiceabilityMapsRestaurantNotFound(t *testing.T) {
+	svc := NewService(&fakeCartService{}, fakeOrderRepository{err: repository.ErrRestaurantNotFound})
+	_, err := svc.Serviceability(context.Background(), ServiceabilityInput{
+		UserID: uuid.New().String(), RestaurantID: uuid.New().String(), AddressID: uuid.New().String(),
+	})
+	serviceErr, ok := err.(*ServiceError)
+	if !ok || serviceErr.StatusCode != 404 || serviceErr.Code != "RESTAURANT_NOT_FOUND" {
+		t.Fatalf("got %#v, want restaurant-not-found 404", err)
+	}
+}
+
+func TestServiceabilityPreservesUnexpectedRepositoryError(t *testing.T) {
+	want := errors.New("database unavailable")
+	svc := NewService(&fakeCartService{}, fakeOrderRepository{err: want})
+	_, err := svc.Serviceability(context.Background(), ServiceabilityInput{
+		UserID: uuid.New().String(), RestaurantID: uuid.New().String(), AddressID: uuid.New().String(),
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("got %v, want %v", err, want)
+	}
 }
 
 func TestPlaceReplaysBeforeReadingConvertedCart(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 type checkoutService interface {
 	Quote(context.Context, business.QuoteInput) (ordermodels.Quote, error)
 	Place(context.Context, business.PlaceInput) (ordermodels.Order, bool, error)
+	Serviceability(context.Context, business.ServiceabilityInput) (ordermodels.Serviceability, error)
 }
 
 type historyService interface {
@@ -40,6 +41,20 @@ func (h *Handler) Quote(c *gin.Context) {
 		return
 	}
 	out, err := h.svc.Quote(c.Request.Context(), business.QuoteInput{UserID: userID(c), CartToken: req.CartToken, AddressID: req.AddressID})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
+func (h *Handler) Serviceability(c *gin.Context) {
+	var req serviceabilityRequest
+	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "invalid JSON body", []string{})
+		return
+	}
+	out, err := h.svc.Serviceability(c.Request.Context(), business.ServiceabilityInput{UserID: userID(c), RestaurantID: req.RestaurantID, AddressID: req.AddressID})
 	if err != nil {
 		writeError(c, err)
 		return

@@ -20,6 +20,9 @@ func (fakeService) Quote(context.Context, business.QuoteInput) (ordermodels.Quot
 func (fakeService) Place(context.Context, business.PlaceInput) (ordermodels.Order, bool, error) {
 	return ordermodels.Order{}, false, nil
 }
+func (fakeService) Serviceability(context.Context, business.ServiceabilityInput) (ordermodels.Serviceability, error) {
+	return ordermodels.Serviceability{}, nil
+}
 
 func TestPlaceRequiresIdempotencyKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
