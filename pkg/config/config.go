@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ type Config struct {
 	}
 	ClientAPIKey string
 	OTP          struct {
+		OutboxDir  string
 		Provider   string
 		AccountSID string
 		AuthToken  string
@@ -121,6 +123,7 @@ func Load() (*Config, error) {
 	cfg.Payment.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("PAYMENT_PROVIDER")))
 	cfg.ClientAPIKey = strings.TrimSpace(viper.GetString("CLIENT_API_KEY"))
 	cfg.OTP.Provider = strings.ToLower(strings.TrimSpace(viper.GetString("OTP_PROVIDER")))
+	cfg.OTP.OutboxDir = strings.TrimSpace(viper.GetString("MOCK_OTP_OUTBOX_DIR"))
 	cfg.OTP.AccountSID = viper.GetString("TWILIO_ACCOUNT_SID")
 	cfg.OTP.AuthToken = viper.GetString("TWILIO_AUTH_TOKEN")
 	cfg.OTP.FromPhone = viper.GetString("TWILIO_FROM_PHONE")
@@ -187,6 +190,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.JWT.GuestTokenTTLMin == 0 {
 		cfg.JWT.GuestTokenTTLMin = constants.DefaultGuestTokenTTLMin
+	}
+	if cfg.OTP.OutboxDir != "" && (cfg.OTP.Provider != "mock" || (cfg.App.Env != "development" && cfg.App.Env != "test")) {
+		return nil, fmt.Errorf("MOCK_OTP_OUTBOX_DIR requires mock OTP and development/test environment")
 	}
 	return cfg, nil
 }
