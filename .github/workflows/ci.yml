@@ -9,6 +9,7 @@ on:
       - codex/payment-delivery-gate
       - codex/onboarding-serialization
       - codex/persist-order-history
+      - codex/operations-query-repair
     paths-ignore:
       - "**/.env"
       - "**/.env.*"

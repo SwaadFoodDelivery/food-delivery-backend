@@ -98,7 +98,11 @@ func main() {
 	var otpProvider otp.Provider
 	switch cfg.OTP.Provider {
 	case constants.ProviderMock:
-		otpProvider = otp.NewMockProvider(log)
+		mockOTP, err := otp.NewMockProviderWithOutbox(log, cfg.OTP.OutboxDir, cfg.App.Env)
+		if err != nil {
+			startupLog.Fatal().Err(err).Msg("invalid mock OTP outbox")
+		}
+		otpProvider = mockOTP
 	case constants.ProviderDev:
 		otpProvider = otp.NewTwilioProvider(cfg.OTP.AccountSID, cfg.OTP.AuthToken, cfg.OTP.FromPhone)
 	default:
