@@ -73,8 +73,10 @@ type Config struct {
 		PresignBaseURL    string
 	}
 	GRPC struct {
-		OrderAddr     string
-		OrderRequired bool
+		OrderAddr       string
+		OrderRequired   bool
+		OrderServiceKey string
+		OrderTimeoutMS  int
 	}
 	RateLimit struct {
 		DefaultPerMin int
@@ -147,6 +149,11 @@ func Load() (*Config, error) {
 	cfg.S3.PresignBaseURL = strings.TrimSpace(viper.GetString("S3_PRESIGN_BASE_URL"))
 	cfg.GRPC.OrderAddr = viper.GetString("ORDER_GRPC_ADDR")
 	cfg.GRPC.OrderRequired = viper.GetBool("ORDER_GRPC_REQUIRED")
+	cfg.GRPC.OrderServiceKey = strings.TrimSpace(viper.GetString("ORDER_GRPC_SERVICE_KEY"))
+	cfg.GRPC.OrderTimeoutMS = viper.GetInt("ORDER_GRPC_TIMEOUT_MS")
+	if cfg.GRPC.OrderTimeoutMS == 0 {
+		cfg.GRPC.OrderTimeoutMS = 2000
+	}
 	cfg.RateLimit.DefaultPerMin = viper.GetInt("RATE_LIMIT_DEFAULT_PER_MIN")
 	cfg.RateLimit.WindowSec = viper.GetInt("RATE_LIMIT_WINDOW_SEC")
 	if cfg.App.Port == "" {

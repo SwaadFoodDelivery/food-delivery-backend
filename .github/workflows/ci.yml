@@ -10,6 +10,7 @@ on:
       - codex/onboarding-serialization
       - codex/persist-order-history
       - codex/operations-query-repair
+      - codex/mock-otp-outbox
     paths-ignore:
       - "**/.env"
       - "**/.env.*"

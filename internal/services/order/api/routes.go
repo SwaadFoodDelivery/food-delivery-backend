@@ -20,6 +20,9 @@ func RegisterRoutes(v1Protected *gin.RouterGroup, deps *app.Container) {
 	orders.POST("/serviceability", h.Serviceability)
 	orders.POST("", h.Place)
 	orders.GET("", h.List)
+	if deps.Config.GRPC.OrderRequired && deps.OrderClient != nil {
+		orders.GET("/:orderId", NewGRPCReadHandler(deps.OrderClient))
+	}
 	orders.GET("/:orderId/history", h.History)
 	orders.PATCH("/:orderId/cancel", h.Cancel)
 }
