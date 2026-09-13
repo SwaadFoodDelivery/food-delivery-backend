@@ -10,6 +10,7 @@ on:
       - codex/onboarding-serialization
       - codex/persist-order-history
       - codex/operations-query-repair
+      - codex/mock-otp-outbox
     paths-ignore:
       - "**/.env"
       - "**/.env.*"
@@ -98,3 +99,65 @@ jobs:
           go test -race ./internal/services/users/business -run TestOnboardingIntegration -count=1 -v
           go test -race ./internal/services/order/repository -run TestServiceabilityPostGIS -count=1 -v
           go test -race ./internal/services/delivery/repository -run TestPaymentDeliveryGatePostgres -count=1 -v
+
+  paired-order-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgis/postgis:15-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: swaad_grpc_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d swaad_grpc_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout tested order-service implementation
+        uses: actions/checkout@v4
+        with:
+          repository: SwaadFoodDelivery/order-service
+          ref: 05f99a6e74aaee5b3f955ddd7d5571a65cce99d5
+          path: .integration-order-service
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply authoritative schema and fixture catalog
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/swaad_grpc_test_ci?sslmode=disable
+        run: go test ./infra/postgres -run '^TestMigrationsAndDemoSeed$' -count=1 -v
+      - name: Provision SELECT-only service role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d swaad_grpc_test_ci -v ON_ERROR_STOP=1 -c "CREATE ROLE swaad_rpc_reader LOGIN PASSWORD 'fictional-local-reader-only-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE; GRANT USAGE ON SCHEMA public TO swaad_rpc_reader; GRANT SELECT ON orders,order_items,payments TO swaad_rpc_reader;"
+      - name: Build real order-service binary
+        working-directory: .integration-order-service
+        run: go build -o /tmp/swaad-order-rpc-ci ./cmd/server
+      - name: HTTP to actual gRPC service to PostGIS acceptance
+        env:
+          APP_ENV: test
+          ORDER_GRPC_ADDR: 127.0.0.1:15051
+          ORDER_GRPC_SERVICE_KEY: fictional-local-service-key-1234567890
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: '5432'
+          POSTGRES_USER: swaad_rpc_reader
+          POSTGRES_PASSWORD: fictional-local-reader-only-ci
+          POSTGRES_DB: swaad_grpc_test_ci
+          POSTGRES_SSLMODE: disable
+          ORDER_RPC_E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/swaad_grpc_test_ci?sslmode=disable
+          ORDER_RPC_E2E_ADDR: 127.0.0.1:15051
+          ORDER_RPC_E2E_KEY: fictional-local-service-key-1234567890
+        run: |
+          /tmp/swaad-order-rpc-ci >/tmp/swaad-order-rpc-ci.log 2>&1 &
+          order_rpc_pid=$!
+          trap 'kill "$order_rpc_pid" 2>/dev/null || true; wait "$order_rpc_pid" 2>/dev/null || true' EXIT
+          go test -race ./internal/services/order/api -run TestPairedOrderServicePostgres -count=1 -v
