@@ -47,26 +47,26 @@ func TestOrderIdentityHTTPErrorMapping(t *testing.T) {
 				r := gin.New()
 				r.Use(func(c *gin.Context) { c.Set(constants.AuthContextUserIDKey, uuid.NewString()); c.Next() })
 				h := NewHandler(identityService{err: tc.err})
+				suffix := "/history"
 				if method == http.MethodGet {
 					r.GET("/orders/:orderId/history", h.History)
 				} else {
-					r.PATCH("/orders/:orderId/history", h.Cancel)
+					suffix = "/cancel"
+					r.PATCH("/orders/:orderId/cancel", h.Cancel)
 				}
 				response := httptest.NewRecorder()
-				r.ServeHTTP(response, httptest.NewRequest(method, "/orders/"+uuid.NewString()+"/history", nil))
+				r.ServeHTTP(response, httptest.NewRequest(method, "/orders/"+uuid.NewString()+suffix, nil))
 				if response.Code != tc.status {
 					t.Fatalf("HTTP %d, want %d: %s", response.Code, tc.status, response.Body.String())
 				}
 				var body struct {
-					Error struct {
-						Code string `json:"code"`
-					} `json:"error"`
+					ErrorCode string `json:"error_code"`
 				}
 				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if body.Error.Code != tc.code {
-					t.Fatalf("error code %q, want %q", body.Error.Code, tc.code)
+				if body.ErrorCode != tc.code {
+					t.Fatalf("error code %q, want %q", body.ErrorCode, tc.code)
 				}
 			})
 		}

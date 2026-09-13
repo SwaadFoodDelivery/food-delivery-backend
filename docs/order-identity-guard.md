@@ -45,9 +45,17 @@ UUIDs, and synchronizes a second connection's insert after cancellation selectio
 with channels through a private per-call test seam. No sleeps or global hooks are
 used. CI runs it in the existing paired job's dedicated database after schema setup.
 
+Verified locally on 2026-09-14: full `go test -race -count=1 ./...`, `go vet ./...`,
+and the opt-in PostgreSQL command above all passed. PostgreSQL ran against
+`swaad_grpc_test_20260912` with clean schema29 and PostGIS. All six scenarios passed,
+including the channel-synchronized insert-after-selection regression. Other opt-in
+integration suites were not enabled during the full race run. No migrations or
+runtime restarts were performed.
+
 ## Rollback
 
-No data migration needs undoing. Reverting this commit restores the old UUID-only
-behavior, including the unsafe multi-partition cancellation update. If rollback is
-necessary, disable the affected cancellation UI/route until an equivalent identity
-guard is restored; do not represent a code revert as a safe identity resolution.
+No data migration needs undoing. If rollback is necessary, disable the affected
+cancellation UI/route and retain the composite update predicate and affected-row
+check until an equivalent guard is restored. Do not revert to the broad UUID-only
+cancellation UPDATE: that restores the safety defect. History should continue to
+reject ambiguous IDs, or be disabled while its replacement is prepared.
