@@ -19,6 +19,7 @@ var (
 	ErrNotServiceable     = errors.New("address not serviceable")
 	ErrInvalidPayment     = errors.New("invalid payment method")
 	ErrOrderNotFound      = errors.New("order not found")
+	ErrOrderAmbiguous     = errors.New("order ID matches multiple owned orders")
 	ErrOrderNotCancelable = errors.New("order cannot be cancelled")
 )
 

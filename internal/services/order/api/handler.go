@@ -186,6 +186,10 @@ func userID(c *gin.Context) string {
 }
 
 func writeError(c *gin.Context, err error) {
+	if errors.Is(err, repository.ErrOrderAmbiguous) {
+		response.Error(c, http.StatusConflict, "ORDER_ID_AMBIGUOUS", "order ID matches multiple owned orders", []string{})
+		return
+	}
 	var serviceErr *business.ServiceError
 	if errors.As(err, &serviceErr) {
 		response.Error(c, serviceErr.StatusCode, serviceErr.Code, serviceErr.Message, []string{})
