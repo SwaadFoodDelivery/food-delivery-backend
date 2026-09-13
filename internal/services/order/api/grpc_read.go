@@ -37,21 +37,7 @@ func NewGRPCReadHandler(reader OrderReader) gin.HandlerFunc {
 		}
 		out, err := reader.GetOrder(c.Request.Context(), &orderpb.GetOrderRequest{OrderId: id.String(), RequesterUserId: uid.String(), RequesterRole: constants.RoleClient})
 		if err != nil {
-			httpStatus, code, message := http.StatusBadGateway, "ORDER_SERVICE_ERROR", "order service request failed"
-			switch status.Code(err) {
-			case codes.NotFound:
-				httpStatus, code, message = http.StatusNotFound, "ORDER_NOT_FOUND", "order not found"
-			case codes.InvalidArgument:
-				httpStatus, code, message = http.StatusBadRequest, "VALIDATION_ERROR", "invalid order request"
-			case codes.PermissionDenied:
-				httpStatus, code, message = http.StatusForbidden, "FORBIDDEN", "order access denied"
-			case codes.DeadlineExceeded:
-				httpStatus, code, message = http.StatusGatewayTimeout, "ORDER_SERVICE_TIMEOUT", "order service timed out"
-			case codes.Unavailable, codes.Canceled:
-				httpStatus, code, message = http.StatusServiceUnavailable, "ORDER_SERVICE_UNAVAILABLE", "order service unavailable"
-			}
-			// Dependency auth errors are 502, not a request for customer re-login.
-			response.Error(c, httpStatus, code, message, []string{})
+			writeOrderRPCError(c, err)
 			return
 		}
 		if out == nil {
@@ -67,4 +53,22 @@ func NewGRPCReadHandler(reader OrderReader) gin.HandlerFunc {
 		}
 		response.Success(c, http.StatusOK, gin.H{"order_id": out.OrderId, "status": strings.ToLower(out.Status.String()), "total_amount_minor": out.TotalAmountMinor, "currency": out.Currency, "created_at": out.CreatedAt, "restaurant_id": out.RestaurantId, "payment_status": out.PaymentStatus, "payment_method": out.PaymentMethod, "items": items})
 	}
+}
+
+func writeOrderRPCError(c *gin.Context, err error) {
+	httpStatus, code, message := http.StatusBadGateway, "ORDER_SERVICE_ERROR", "order service request failed"
+	switch status.Code(err) {
+	case codes.NotFound:
+		httpStatus, code, message = http.StatusNotFound, "ORDER_NOT_FOUND", "order not found"
+	case codes.InvalidArgument:
+		httpStatus, code, message = http.StatusBadRequest, "VALIDATION_ERROR", "invalid order request"
+	case codes.PermissionDenied:
+		httpStatus, code, message = http.StatusForbidden, "FORBIDDEN", "order access denied"
+	case codes.DeadlineExceeded:
+		httpStatus, code, message = http.StatusGatewayTimeout, "ORDER_SERVICE_TIMEOUT", "order service timed out"
+	case codes.Unavailable, codes.Canceled:
+		httpStatus, code, message = http.StatusServiceUnavailable, "ORDER_SERVICE_UNAVAILABLE", "order service unavailable"
+	}
+	// Dependency auth errors are 502, not a request for customer re-login.
+	response.Error(c, httpStatus, code, message, []string{})
 }

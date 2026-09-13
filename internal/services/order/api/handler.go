@@ -86,6 +86,10 @@ func (h *Handler) Place(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
+	if c.Query("cursor") != "" {
+		response.Error(c, http.StatusBadRequest, apperrors.CodeValidation, "cursor requires order-service pagination", []string{})
+		return
+	}
 	limit := 20
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
