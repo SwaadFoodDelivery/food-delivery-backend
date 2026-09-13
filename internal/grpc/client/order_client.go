@@ -36,6 +36,11 @@ func ValidateOrderGRPCConfig(cfg *config.Config) error {
 	if len(strings.TrimSpace(cfg.GRPC.OrderServiceKey)) < 32 {
 		return fmt.Errorf("ORDER_GRPC_SERVICE_KEY must contain at least 32 characters")
 	}
+	for _, b := range []byte(cfg.GRPC.OrderServiceKey) {
+		if b < 33 || b > 126 {
+			return fmt.Errorf("ORDER_GRPC_SERVICE_KEY must contain printable ASCII without spaces")
+		}
+	}
 	if cfg.GRPC.OrderTimeoutMS < 100 || cfg.GRPC.OrderTimeoutMS > 10000 {
 		return fmt.Errorf("ORDER_GRPC_TIMEOUT_MS must be between 100 and 10000")
 	}

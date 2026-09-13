@@ -21,6 +21,7 @@ func TestRejectInsecureOrderGRPCConfiguration(t *testing.T) {
 		"missingPort":      func(c *config.Config) { c.GRPC.OrderAddr = "127.0.0.1" },
 		"invalidPort":      func(c *config.Config) { c.GRPC.OrderAddr = "127.0.0.1:65536" },
 		"shortKey":         func(c *config.Config) { c.GRPC.OrderServiceKey = "short" },
+		"keyWithSpaces":    func(c *config.Config) { c.GRPC.OrderServiceKey = "fictional-local-service-key with spaces" },
 		"unboundedTimeout": func(c *config.Config) { c.GRPC.OrderTimeoutMS = 0 },
 		"longTimeout":      func(c *config.Config) { c.GRPC.OrderTimeoutMS = 10001 },
 	} {

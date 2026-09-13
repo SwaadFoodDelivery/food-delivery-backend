@@ -63,6 +63,24 @@ gRPC server to verify transport, delegated identity, exact amounts, deadlines,
 error mapping and opt-in route registration. Real order-service/PostGIS paired
 acceptance is a separate required gate, not implied by those contract tests.
 
+That paired gate is now committed as TestPairedOrderServicePostgres and the
+paired-order-service CI job. It builds the pinned real order-service PR1
+implementation, uses a SELECT-only login against fresh backend-migrated PostGIS,
+and checks HTTP owned reads, stored snapshots, ownership/role denial and service
+credential failure. It explicitly seeds middleware identity, not browser login.
+Local rerun with a running service and the dedicated schema:
+
+```sh
+ORDER_RPC_E2E_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/swaad_grpc_test_20260912?sslmode=disable' \
+ORDER_RPC_E2E_ADDR=127.0.0.1:15051 \
+ORDER_RPC_E2E_KEY='<same-local-service-key>' \
+go test -race ./internal/services/order/api -run TestPairedOrderServicePostgres -count=1 -v
+```
+
+New fictional fixtures remain in the guarded disposable database. Partial
+configuration fails; absent all configuration explicitly skips the paired test.
+CI supplies it, so CI cannot satisfy this gate with a skipped local-only test.
+
 Rollback: disable `ORDER_GRPC_REQUIRED` and revert this feature through review.
 No data migration or order rewrite is required. The established demo checkout
 is unaffected; consumers of the new read endpoint must tolerate its absence.
