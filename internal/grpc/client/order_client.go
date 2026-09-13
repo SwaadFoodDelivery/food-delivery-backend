@@ -78,10 +78,21 @@ func (c *OrderServiceClient) Close() error {
 // Only real typed reads are exposed. The former echo-success placeholders are
 // removed; checkout and all mutations remain backend-owned during extraction.
 func (c *OrderServiceClient) GetOrder(ctx context.Context, in *orderpb.GetOrderRequest) (*orderpb.OrderResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := c.readContext(ctx)
 	defer cancel()
+	return c.rpc.GetOrder(ctx, in)
+}
+
+func (c *OrderServiceClient) GetUserOrders(ctx context.Context, in *orderpb.GetUserOrdersRequest) (*orderpb.GetUserOrdersResponse, error) {
+	ctx, cancel := c.readContext(ctx)
+	defer cancel()
+	return c.rpc.GetUserOrders(ctx, in)
+}
+
+func (c *OrderServiceClient) readContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	md, _ := metadata.FromOutgoingContext(ctx)
 	md = md.Copy()
 	md.Set("x-order-service-key", c.key)
-	return c.rpc.GetOrder(metadata.NewOutgoingContext(ctx, md), in)
+	return metadata.NewOutgoingContext(ctx, md), cancel
 }

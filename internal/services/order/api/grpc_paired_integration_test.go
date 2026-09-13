@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +118,86 @@ func TestPairedOrderServicePostgres(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT total_amount::text FROM orders WHERE order_id=$1 AND created_at=$2", orderID, created).Scan(&total); err != nil || total != "10.05" {
 		t.Fatal("read mutated order")
 	}
+	t.Run("paginated owned summaries", func(t *testing.T) {
+		// Three orders share an exact microsecond timestamp; a fourth is one
+		// microsecond older. This catches loss of precision and timestamp-only cursors.
+		tied := []string{orderID.String(), uuid.NewString(), uuid.NewString()}
+		older := uuid.NewString()
+		insertOrder := func(id string, at time.Time) {
+			t.Helper()
+			if _, err := db.ExecContext(ctx, "INSERT INTO orders(order_id,created_at,user_id,restaurant_id,status,subtotal,taxes,delivery_fee,total_amount,payment_method) VALUES($1,$2,$3,'10000000-0000-4000-8000-000000000001','confirmed',10.05,0,0,10.05,'cash_on_delivery')", id, at, owner); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, id := range tied[1:] {
+			insertOrder(id, created)
+		}
+		insertOrder(older, created.Add(-time.Microsecond))
+		sort.Sort(sort.Reverse(sort.StringSlice(tied)))
+		type summary struct {
+			ID         string  `json:"order_id"`
+			Amount     int64   `json:"total_amount_minor"`
+			Currency   string  `json:"currency"`
+			Restaurant string  `json:"restaurant_name"`
+			Created    string  `json:"created_at"`
+			Delivery   *string `json:"delivery_status"`
+		}
+		type envelope struct {
+			Data struct {
+				Orders []summary `json:"orders"`
+				Next   string    `json:"next_cursor"`
+			} `json:"data"`
+		}
+		fetch := func(cursor string) envelope {
+			t.Helper()
+			rec := listHTTP(reader, owner.String(), "client", "limit=2&cursor="+url.QueryEscape(cursor)+"&user_id="+foreign.String()+"&requester_role=admin")
+			if rec.Code != 200 {
+				t.Fatalf("paired list status %d: %s", rec.Code, rec.Body.String())
+			}
+			var out envelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			return out
+		}
+		first := fetch("")
+		if len(first.Data.Orders) != 2 || first.Data.Next == "" || len(first.Data.Next) > 1024 || first.Data.Orders[0].ID != tied[0] || first.Data.Orders[1].ID != tied[1] {
+			t.Fatal("first page/tie ordering failed")
+		}
+		for _, row := range first.Data.Orders {
+			at, err := time.Parse(time.RFC3339Nano, row.Created)
+			if err != nil || !at.Equal(created) || row.Amount != 1005 || row.Currency != "INR" || row.Restaurant == "" || row.Delivery != nil {
+				t.Fatal("list summary contract or precision lost")
+			}
+		}
+		// A newer insertion cannot displace or duplicate entries on the next page.
+		insertOrder(uuid.NewString(), created.Add(time.Second))
+		second := fetch(first.Data.Next)
+		if len(second.Data.Orders) != 2 || second.Data.Next != "" || second.Data.Orders[0].ID != tied[2] || second.Data.Orders[1].ID != older {
+			t.Fatal("continuation skipped/duplicated rows or fabricated next page")
+		}
+		at, err := time.Parse(time.RFC3339Nano, second.Data.Orders[1].Created)
+		if err != nil || !at.Equal(created.Add(-time.Microsecond)) {
+			t.Fatal("older microsecond was lost")
+		}
+		if rec := listHTTP(reader, foreign.String(), "client", "limit=2&cursor="+url.QueryEscape(first.Data.Next)); rec.Code != 400 {
+			t.Fatalf("foreign cursor status %d", rec.Code)
+		}
+		for _, cursor := range []string{"malformed", "!" + first.Data.Next[1:]} {
+			if rec := listHTTP(reader, owner.String(), "client", "limit=2&cursor="+url.QueryEscape(cursor)); rec.Code != 400 {
+				t.Fatalf("tampered cursor status %d", rec.Code)
+			}
+		}
+		empty := uuid.New()
+		if _, err := db.ExecContext(ctx, "INSERT INTO users(user_id,phone,name,role,account_status,onboarding_complete) VALUES($1,$2,'Fictional empty list client','client','active',true)", empty, empty.String()[:14]); err != nil {
+			t.Fatal(err)
+		}
+		if rec := listHTTP(reader, empty.String(), "client", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"orders":[]`) || !strings.Contains(rec.Body.String(), `"next_cursor":""`) {
+			t.Fatal("empty paired list contract failed")
+		}
+		if listHTTP(reader, owner.String(), "driver", "").Code != 403 || listHTTP(badReader, owner.String(), "client", "").Code != 502 {
+			t.Fatal("list authorization did not fail closed")
+		}
+	})
 	t.Log("paired HTTP -> real order-service -> PostGIS passed: owned snapshot, foreign/missing, role denial, dependency auth failure; fictional fixtures retained")
 }

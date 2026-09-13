@@ -1,10 +1,11 @@
-# ORDER-GRPC-001: first actual order-service integration
+# ORDER-GRPC-001/002: actual order-service reads
 
 Implemented boundary: authenticated client `GET /api/v1/orders/:orderId` calls
 typed `order.v1.OrderService/GetOrder`. The route exists only when
 `ORDER_GRPC_REQUIRED=true`. Disabled mode does not silently serve a local order
-snapshot; the new route is absent. Existing checkout, history, cancellation,
-payment and delivery endpoints keep their current backend implementations.
+snapshot; the new route is absent. When enabled, `GET /api/v1/orders` also calls
+typed `GetUserOrders` for owned paginated summaries. Existing checkout, timeline,
+cancellation, payment and delivery endpoints keep their backend implementations.
 
 The old `any` echo-success gRPC methods were placeholders, not integration. They
 are removed. This feature does not transfer write ownership to order-service.
@@ -56,23 +57,25 @@ Dependency auth errors are not customer-session expiry (401); the API never
 returns internal RPC diagnostics or credentials. Invalid local user identity is
 401; non-client local roles are denied before calling gRPC.
 
-Contract: proto PR1, pinned pseudo-version
-`v0.0.0-20260912173032-f946f9d3345e`; no local module replacement is committed.
+Contract: proto PR2, pinned pseudo-version
+`v0.0.0-20260913090154-dc2e8c6d6c1d`; no local module replacement is committed.
 Run `go test -race ./...` and `go vet ./...`. HTTP tests use an actual loopback
 gRPC server to verify transport, delegated identity, exact amounts, deadlines,
 error mapping and opt-in route registration. Real order-service/PostGIS paired
 acceptance is a separate required gate, not implied by those contract tests.
 
 That paired gate is now committed as TestPairedOrderServicePostgres and the
-paired-order-service CI job. It builds the pinned real order-service PR1
+paired-order-service CI job. It builds the pinned real order-service
 implementation, uses a SELECT-only login against fresh backend-migrated PostGIS,
 and checks HTTP owned reads, stored snapshots, ownership/role denial and service
-credential failure. It explicitly seeds middleware identity, not browser login.
+credential failure. The list subtest checks tied timestamps, microsecond precision,
+insertion between pages, terminal/empty pages and foreign/tampered cursors.
+It explicitly seeds middleware identity, not browser login.
 Local rerun with a running service and the dedicated schema:
 
 ```sh
 ORDER_RPC_E2E_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/swaad_grpc_test_20260912?sslmode=disable' \
-ORDER_RPC_E2E_ADDR=127.0.0.1:15051 \
+ORDER_RPC_E2E_ADDR=127.0.0.1:15052 \
 ORDER_RPC_E2E_KEY='<same-local-service-key>' \
 go test -race ./internal/services/order/api -run TestPairedOrderServicePostgres -count=1 -v
 ```
@@ -84,3 +87,28 @@ CI supplies it, so CI cannot satisfy this gate with a skipped local-only test.
 Rollback: disable `ORDER_GRPC_REQUIRED` and revert this feature through review.
 No data migration or order rewrite is required. The established demo checkout
 is unaffected; consumers of the new read endpoint must tolerate its absence.
+
+## Paginated order summaries
+
+`GET /api/v1/orders?limit=20&cursor=<opaque-token>` returns the existing
+`data.orders` summary array plus `data.next_cursor`. Limits must be 1–50; omitted
+limit defaults to 20. Empty results are `[]`; an empty next_cursor means there
+is no further page. No global total is available; deprecated RPC total is not
+exposed as a count. The existing frontend can continue consuming its first page.
+
+The service orders by `(created_at, order_id)` descending, fetches at most limit+1
+rows and signs a versioned owner-bound cursor from the last returned row only
+when another row exists. SQL independently filters the authenticated owner.
+Invalid, foreign or tampered cursors return HTTP 400. Cursor size is at most 1024
+bytes. Pagination preserves ordering, not a frozen cross-request snapshot; newer
+inserts appear on a fresh first page. Key rotation invalidates existing cursors.
+Summary reads do not fetch items or payment details. Missing delivery remains
+omitted, and inactive restaurants do not hide a customer's historical orders.
+
+Deploy the list-capable service and SELECT-only grants for `restaurants` and
+`deliveries` (in addition to `orders`, `order_items`, `payments`) BEFORE this
+backend with delegation enabled. An old GetOrder-only service returns 502 for
+the list; there is deliberately no local SQL fallback. On rollback, revert the
+backend before reverting service/grants. Disabled mode retains local first-page
+listing but rejects any nonempty cursor with 400, so clients should clear it and
+restart the list. Never grant INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER.

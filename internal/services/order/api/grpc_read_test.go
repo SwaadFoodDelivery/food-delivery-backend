@@ -52,7 +52,7 @@ func (s *readRPC) GetOrder(ctx context.Context, request *orderpb.GetOrderRequest
 	return &orderpb.OrderResponse{OrderId: request.OrderId, Status: orderpb.OrderStatus_CONFIRMED, Currency: "INR", TotalAmountMinor: 10005, Items: []*orderpb.OrderItem{{ItemNameSnapshot: "Stored dish", ItemPriceSnapshotMinor: 5005, LineTotalMinor: 10010, Quantity: 2}}}, nil
 }
 
-func rpcReader(t *testing.T, service *readRPC, key string) *grpcclient.OrderServiceClient {
+func rpcReader(t *testing.T, service orderpb.OrderServiceServer, key string) *grpcclient.OrderServiceClient {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
