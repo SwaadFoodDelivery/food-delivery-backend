@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	stderrors "errors"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/utils"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -26,6 +28,7 @@ type AuthService interface {
 	Register(ctx context.Context, in models.RegisterInput) (*models.OTPSendOutput, *models.ServiceError)
 	SendOTP(ctx context.Context, in models.SendOTPInput) (*models.OTPSendOutput, *models.ServiceError)
 	VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*models.VerifyOTPOutput, *models.ServiceError)
+	Refresh(ctx context.Context, in models.RefreshInput) (*models.RefreshOutput, *models.ServiceError)
 	SendEmailOTP(ctx context.Context, in models.SendEmailOTPInput) (*models.EmailOTPSendOutput, *models.ServiceError)
 	VerifyEmail(ctx context.Context, in models.VerifyEmailInput) (*models.VerifyEmailOutput, *models.ServiceError)
 	Logout(ctx context.Context, in models.LogoutInput) *models.ServiceError
@@ -457,6 +460,63 @@ func (s *Service) VerifyOTP(ctx context.Context, in models.VerifyOTPInput) (*mod
 	}
 
 	return out, nil
+}
+
+// Refresh exchanges a still-valid refresh token for a new access token,
+// without requiring the caller to re-verify an OTP. It is deliberately
+// symmetric with JWTAuthMiddleware's own liveness check: the same Redis
+// session record (is_active, sliding TTL) that gates an access token also
+// gates renewal, so a logout or an idle session already blocks both the
+// same way. The refresh token itself is not rotated — revocation is carried
+// entirely by the shared session, which keeps this endpoint simple while
+// still closing the moment logout or session expiry is meant to close.
+func (s *Service) Refresh(ctx context.Context, in models.RefreshInput) (*models.RefreshOutput, *models.ServiceError) {
+	raw := strings.TrimSpace(in.RefreshToken)
+	if raw == "" {
+		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeInvalidToken, Message: "missing refresh token", Details: []string{}}
+	}
+
+	claims, err := utils.ParseRefreshToken(s.cfg.JWT.Secret, raw)
+	if err != nil {
+		if stderrors.Is(err, jwt.ErrTokenExpired) {
+			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeTokenExpired, Message: "refresh token expired", Details: []string{}}
+		}
+		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeInvalidToken, Message: "invalid refresh token", Details: []string{}}
+	}
+	if claims.ID == "" || claims.UserID == "" {
+		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeInvalidToken, Message: "invalid refresh token claims", Details: []string{}}
+	}
+
+	session, err := s.repo.GetSession(ctx, claims.ID)
+	if err != nil {
+		if repository.IsNotFound(err) {
+			return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeSessionNotFound, Message: "session not found", Details: []string{}}
+		}
+		return nil, internalErr("failed to load session")
+	}
+	if !session.IsActive {
+		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeSessionRevoked, Message: "session revoked", Details: []string{}}
+	}
+	// The session hash is keyed by session ID alone; cross-check the user it
+	// was issued to so a forged/mismatched token can never ride an unrelated
+	// session that happens to still be active.
+	if session.UserID != claims.UserID {
+		return nil, &models.ServiceError{StatusCode: http.StatusUnauthorized, Code: apperrors.CodeInvalidToken, Message: "invalid refresh token claims", Details: []string{}}
+	}
+
+	accessToken, err := utils.CreateAccessToken(s.cfg.JWT.Secret, session.UserID, session.Role, claims.ID, constants.AuthAccessTokenTTL)
+	if err != nil {
+		return nil, internalErr("failed to sign access token")
+	}
+	if err := s.repo.TouchSession(ctx, claims.ID, constants.AuthSessionTTL); err != nil {
+		return nil, internalErr("failed to renew session")
+	}
+
+	return &models.RefreshOutput{
+		AccessToken: accessToken,
+		TokenType:   constants.BearerTokenType,
+		ExpiresIn:   int(constants.AuthAccessTokenTTL.Seconds()),
+	}, nil
 }
 
 // SendEmailOTP issues an email OTP before any account exists. It is scoped to the

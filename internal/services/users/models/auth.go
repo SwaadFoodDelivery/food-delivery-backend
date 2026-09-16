@@ -67,6 +67,10 @@ type LogoutInput struct {
 	Role      string
 }
 
+type RefreshInput struct {
+	RefreshToken string
+}
+
 type CheckPhoneOutput struct {
 	Registered      bool   `json:"registered"`
 	AccountStatus   string `json:"account_status,omitempty"`
@@ -87,6 +91,12 @@ type VerifyOTPOutput struct {
 	TokenType    string       `json:"token_type"`
 	ExpiresIn    int          `json:"expires_in"`
 	User         VerifiedUser `json:"user"`
+}
+
+type RefreshOutput struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
 }
 
 type EmailOTPSendOutput struct {
@@ -166,6 +176,12 @@ type VerifyOTPRequest struct {
 	Phone string
 	Role  string
 	OTP   string
+}
+
+// RefreshRequest is only bound when the refresh token was not delivered in
+// the "refresh_token" HttpOnly cookie (non-web clients get it here instead).
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 type SendEmailOTPRequest struct {
