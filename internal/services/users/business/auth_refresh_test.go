@@ -11,8 +11,8 @@ import (
 	apperrors "food-delivery-backend/internal/errors"
 	"food-delivery-backend/internal/services/users/business"
 	"food-delivery-backend/internal/services/users/models"
-	"food-delivery-backend/internal/services/users/repository/repository"
 	redisstore "food-delivery-backend/internal/services/users/repository/redis"
+	"food-delivery-backend/internal/services/users/repository/repository"
 	"food-delivery-backend/pkg/config"
 	"food-delivery-backend/pkg/utils"
 
