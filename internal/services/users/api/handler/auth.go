@@ -121,6 +121,25 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	response.Success(c, http.StatusOK, out)
 }
 
+// Refresh reads the refresh token the same way it was delivered: the
+// HttpOnly cookie for web clients, falling back to a JSON body field for
+// clients that received it there instead (see VerifyOTP above).
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	refreshToken, _ := c.Cookie("refresh_token")
+	if strings.TrimSpace(refreshToken) == "" {
+		var body models.RefreshRequest
+		_ = c.ShouldBindJSON(&body)
+		refreshToken = body.RefreshToken
+	}
+
+	out, svcErr := h.svc.Refresh(c.Request.Context(), models.RefreshInput{RefreshToken: refreshToken})
+	if svcErr != nil {
+		writeServiceError(c, svcErr)
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
 func (h *AuthHandler) SendEmailOTP(c *gin.Context) {
 	req, ok := middleware.GetValidatedBody[models.SendEmailOTPRequest](c)
 	if !ok {

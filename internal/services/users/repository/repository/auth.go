@@ -56,6 +56,8 @@ type Repository interface {
 	DeleteEmailVerified(ctx context.Context, guestSessionID, email string) error
 	SetSession(ctx context.Context, in SetSessionInput, ttl time.Duration) error
 	DeleteSession(ctx context.Context, sessionID string) error
+	GetSession(ctx context.Context, sessionID string) (*redisstore.SessionRecord, error)
+	TouchSession(ctx context.Context, sessionID string, ttl time.Duration) error
 
 	ListRequiredDocumentTypes(ctx context.Context, role, country string) ([]models.DocumentTypeDefinitionRow, error)
 	CreateOnboarding(ctx context.Context, in CreateOnboardingInput) (*models.OnboardingRow, error)
@@ -326,4 +328,12 @@ func (r *repo) SetSession(ctx context.Context, in SetSessionInput, ttl time.Dura
 
 func (r *repo) DeleteSession(ctx context.Context, sessionID string) error {
 	return r.cache.DeleteSession(ctx, sessionID)
+}
+
+func (r *repo) GetSession(ctx context.Context, sessionID string) (*redisstore.SessionRecord, error) {
+	return r.cache.GetSession(ctx, sessionID)
+}
+
+func (r *repo) TouchSession(ctx context.Context, sessionID string, ttl time.Duration) error {
+	return r.cache.TouchSession(ctx, sessionID, ttl)
 }

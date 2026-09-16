@@ -42,6 +42,17 @@ func RegisterAuthRoutes(v1Public *gin.RouterGroup, v1Protected *gin.RouterGroup,
 	)
 	verifyOTP.POST("", h.VerifyOTP)
 
+	// Renewal deliberately sits outside the guest-token-gated publicAuth group:
+	// a returning user's guest token (60 min) can lapse independently of their
+	// refresh token (30 days), and requiring one to renew the other would fail
+	// refresh for the wrong reason. Rate-limited by IP since there is no
+	// trusted identity yet at this point -- that only exists once the token
+	// itself has been parsed and its session validated.
+	refresh := v1Public.Group("/auth/refresh",
+		middleware.LeakyBucketRateLimit(deps.Redis, "auth_refresh_ip", 30.0/60.0, 10, 60, middleware.IPKeyFunc),
+	)
+	refresh.POST("", h.Refresh)
+
 	// Email verification runs before an account exists, so it sits behind the guest
 	// token rather than an access token. Register refuses an unverified email.
 	sendEmailOTP := publicAuth.Group("/send-email-otp",

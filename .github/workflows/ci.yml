@@ -3,16 +3,14 @@ name: CI
 on:
   pull_request:
     branches:
+      # A glob instead of one entry per stacked branch: this repo develops as
+      # a chain of PRs, each based on the last (see the checkpoints under
+      # food-delivery-documentations/project/), and a hardcoded list silently
+      # stops running CI on every new PR the moment its base branch is one
+      # commit newer than the list -- exactly what happened to PR22, whose
+      # base (codex/order-identity-guard) was never added here.
       - main
-      - codex/vert-001-catalog
-      - codex/serviceability-policy
-      - codex/payment-delivery-gate
-      - codex/onboarding-serialization
-      - codex/persist-order-history
-      - codex/operations-query-repair
-      - codex/mock-otp-outbox
-      - codex/order-grpc-read
-      - codex/order-list-read
+      - "codex/**"
     paths-ignore:
       - "**/.env"
       - "**/.env.*"

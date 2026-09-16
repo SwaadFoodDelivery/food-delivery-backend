@@ -69,3 +69,20 @@ func ParseAccessToken(secret, raw string) (*AccessTokenClaims, error) {
 	}
 	return claims, nil
 }
+
+func ParseRefreshToken(secret, raw string) (*RefreshTokenClaims, error) {
+	claims := &RefreshTokenClaims{}
+	token, err := jwt.ParseWithClaims(raw, claims, func(token *jwt.Token) (any, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+	return claims, nil
+}

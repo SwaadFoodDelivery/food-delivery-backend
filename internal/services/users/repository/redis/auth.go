@@ -180,3 +180,34 @@ func (s *Store) SetSession(ctx context.Context, in SetSessionInput, ttl time.Dur
 func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
 	return s.redis.Del(ctx, appredis.SessionKey(sessionID)).Err()
 }
+
+type SessionRecord struct {
+	UserID   string
+	Role     string
+	DeviceID string
+	IsActive bool
+}
+
+// GetSession mirrors the liveness check JWTAuthMiddleware already performs, so
+// a session considered alive for an access token is judged the same way here.
+func (s *Store) GetSession(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	data, err := s.redis.HGetAll(ctx, appredis.SessionKey(sessionID)).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, apperrors.ErrNotFound
+	}
+	return &SessionRecord{
+		UserID:   data["user_id"],
+		Role:     data["role"],
+		DeviceID: data["device_id"],
+		IsActive: data["is_active"] == "true",
+	}, nil
+}
+
+// TouchSession slides the session's Redis TTL forward, matching the sliding
+// window JWTAuthMiddleware applies on every authenticated request.
+func (s *Store) TouchSession(ctx context.Context, sessionID string, ttl time.Duration) error {
+	return s.redis.Expire(ctx, appredis.SessionKey(sessionID), ttl).Err()
+}
