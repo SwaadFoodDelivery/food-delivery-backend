@@ -18,4 +18,5 @@ func RegisterRoutes(protected *gin.RouterGroup, deps *app.Container) {
 	driver := protected.Group("/driver", middleware.RequireRole(constants.RoleDriver), approved)
 	driver.GET("/delivery", h.GetForDriver)
 	driver.PATCH("/delivery/status", h.UpdateForDriver)
+	driver.GET("/earnings", h.GetEarnings)
 }

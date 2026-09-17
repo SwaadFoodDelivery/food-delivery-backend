@@ -15,6 +15,17 @@ const (
 	StatusDelivered           = "delivered"
 )
 
+// Earnings is a driver's lifetime payout total in this demo economy: the sum
+// of the delivery_fee on every order whose delivery this driver completed.
+// There is no separate commission/payout-rate concept in this schema -- the
+// customer-facing delivery fee is the payout, by design.
+type Earnings struct {
+	TotalEarnings  int64  `json:"total_earnings_minor"`
+	DeliveredCount int    `json:"delivered_count"`
+	Currency       string `json:"currency"`
+	DemoLabel      string `json:"demo_label"`
+}
+
 type Delivery struct {
 	DeliveryID       uuid.UUID  `json:"delivery_id"`
 	OrderID          uuid.UUID  `json:"order_id"`

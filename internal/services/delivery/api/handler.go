@@ -88,6 +88,19 @@ func (h *Handler) UpdateForDriver(c *gin.Context) {
 	response.Success(c, http.StatusOK, out)
 }
 
+func (h *Handler) GetEarnings(c *gin.Context) {
+	driverID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	out, err := h.svc.GetEarningsForDriver(c.Request.Context(), driverID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "earnings lookup failed", []string{})
+		return
+	}
+	response.Success(c, http.StatusOK, out)
+}
+
 func authenticatedUserID(c *gin.Context) (uuid.UUID, bool) {
 	userID, ok := c.Get(constants.AuthContextUserIDKey)
 	if !ok {
