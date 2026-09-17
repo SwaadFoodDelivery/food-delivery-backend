@@ -335,6 +335,72 @@ func TestPaymentDeliveryGatePostgres(t *testing.T) {
 			t.Fatalf("unsafe expiry of non-mock payment: %+v replay=%v err=%v", again, replay, err)
 		}
 	})
+	t.Run("driver earnings sum only delivered payouts for that driver", func(t *testing.T) {
+		orderID, orderCreated := newOrder("cash_on_delivery")
+		if _, err := repo.EnsureMockDelivery(ctx, orderID, orderCreated, 30*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		var driver uuid.UUID
+		if err := db.GetContext(ctx, &driver, `SELECT partner_id FROM deliveries WHERE order_id=$1`, orderID); err != nil {
+			t.Fatal(err)
+		}
+		var deliveryFeeMinor int64
+		if err := db.GetContext(ctx, &deliveryFeeMinor, `SELECT (delivery_fee*100)::bigint FROM orders WHERE order_id=$1`, orderID); err != nil {
+			t.Fatal(err)
+		}
+
+		before, err := repo.GetEarningsForDriver(ctx, driver)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, next := range []string{
+			models.StatusEnRouteToRestaurant, models.StatusArrivedAtRestaurant,
+			models.StatusPickedUp, models.StatusOutForDelivery,
+		} {
+			if _, err := repo.UpdateForDriver(ctx, driver, next, 30*time.Second); err != nil {
+				t.Fatalf("advance to %s: %v", next, err)
+			}
+		}
+
+		// One step short of delivered: this order's fee must not be counted yet.
+		notYetDelivered, err := repo.GetEarningsForDriver(ctx, driver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if notYetDelivered.TotalEarnings != before.TotalEarnings || notYetDelivered.DeliveredCount != before.DeliveredCount {
+			t.Fatalf("earnings counted an out-for-delivery (not yet delivered) order: before=%+v got=%+v", before, notYetDelivered)
+		}
+
+		if _, err := repo.UpdateForDriver(ctx, driver, models.StatusDelivered, 30*time.Second); err != nil {
+			t.Fatalf("advance to delivered: %v", err)
+		}
+
+		after, err := repo.GetEarningsForDriver(ctx, driver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.TotalEarnings != before.TotalEarnings+deliveryFeeMinor {
+			t.Fatalf("total_earnings_minor = %d, want %d (before %d + fee %d)",
+				after.TotalEarnings, before.TotalEarnings+deliveryFeeMinor, before.TotalEarnings, deliveryFeeMinor)
+		}
+		if after.DeliveredCount != before.DeliveredCount+1 {
+			t.Fatalf("delivered_count = %d, want %d", after.DeliveredCount, before.DeliveredCount+1)
+		}
+		if after.Currency != "INR" {
+			t.Fatalf("currency = %q, want INR", after.Currency)
+		}
+
+		// A driver with no deliveries at all reads as a clean zero, not an error.
+		zero, err := repo.GetEarningsForDriver(ctx, uuid.New())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if zero.TotalEarnings != 0 || zero.DeliveredCount != 0 {
+			t.Fatalf("unknown driver earnings = %+v, want zero", zero)
+		}
+	})
+
 	// Only generated test orders are removed, never the seed or dev records.
 	for _, orderID := range []uuid.UUID{id, cod, cancelled} {
 		exec(`DELETE FROM payments WHERE order_id=$1`, orderID)

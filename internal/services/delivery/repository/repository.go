@@ -21,4 +21,5 @@ type Repository interface {
 	GetForUser(context.Context, uuid.UUID, uuid.UUID) (models.Delivery, error)
 	GetForDriver(context.Context, uuid.UUID) (models.Delivery, error)
 	UpdateForDriver(context.Context, uuid.UUID, string, time.Duration) (models.Delivery, error)
+	GetEarningsForDriver(context.Context, uuid.UUID) (models.Earnings, error)
 }

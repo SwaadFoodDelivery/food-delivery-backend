@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"food-delivery-backend/internal/services/delivery/models"
@@ -273,6 +276,59 @@ func (r *PostgresRepository) UpdateForDriver(ctx context.Context, driverID uuid.
 	}
 	return mapDelivery(after), nil
 }
+
+func (r *PostgresRepository) GetEarningsForDriver(ctx context.Context, driverID uuid.UUID) (models.Earnings, error) {
+	var row struct {
+		Total string `db:"total"`
+		Count int    `db:"delivered_count"`
+	}
+	// Sums the customer-facing delivery_fee across every order this driver
+	// actually completed. Joined on (order_id, created_at) -- orders is
+	// partitioned by created_at, so a bare order_id join would miss the
+	// partition key and silently scan wrong (or fail to match).
+	err := r.db.GetContext(ctx, &row, `
+		SELECT COALESCE(SUM(o.delivery_fee), 0)::text AS total, COUNT(*) AS delivered_count
+		FROM deliveries d
+		JOIN orders o ON o.order_id = d.order_id AND o.created_at = d.order_created_at
+		WHERE d.partner_id = $1 AND d.status = 'delivered'`, driverID)
+	if err != nil {
+		return models.Earnings{}, err
+	}
+	return models.Earnings{
+		TotalEarnings:  mustMinor(row.Total),
+		DeliveredCount: row.Count,
+		Currency:       "INR",
+		DemoLabel:      "SIMULATED EARNINGS — derived from demo delivery fees, not a real payout",
+	}, nil
+}
+
+func decimalToMinor(raw string) (int64, error) {
+	parts := strings.Split(strings.TrimSpace(raw), ".")
+	if len(parts) > 2 || len(parts) == 0 || parts[0] == "" {
+		return 0, fmt.Errorf("invalid decimal %q", raw)
+	}
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+	}
+	if len(fraction) > 2 {
+		return 0, fmt.Errorf("more than two decimal places")
+	}
+	for len(fraction) < 2 {
+		fraction += "0"
+	}
+	whole, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || whole < 0 {
+		return 0, fmt.Errorf("invalid whole amount")
+	}
+	minor, err := strconv.ParseInt(fraction, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid fractional amount")
+	}
+	return whole*100 + minor, nil
+}
+
+func mustMinor(raw string) int64 { value, _ := decimalToMinor(raw); return value }
 
 const deliverySelect = `
 	SELECT d.delivery_id, d.order_id, d.order_created_at, d.provider, d.status::text, d.partner_id,
